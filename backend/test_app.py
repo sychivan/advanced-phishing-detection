@@ -1,7 +1,8 @@
-
+from services.response_validator import validate_ai_response
 import unittest
 from unittest.mock import patch
 from app import app
+
 
 
 class TestBackend(unittest.TestCase):
@@ -24,6 +25,28 @@ class TestBackend(unittest.TestCase):
             }
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_valid_ai_response(self):
+        result = {
+            "classification": "Phishing",
+            "risk_score": 91,
+            "reasons": ["Suspicious link detected"]
+        }
+
+        validated = validate_ai_response(result)
+
+        self.assertEqual(validated["classification"], "Phishing")
+        self.assertEqual(validated["risk_score"], 91)
+
+    def test_invalid_ai_response(self):
+        result = {
+            "classification": "Unknown",
+            "risk_score": 150,
+            "reasons": []
+        }
+
+        with self.assertRaises(ValueError):
+            validate_ai_response(result)
 
     @patch("app.analyse_with_ai")
     def test_email_analysis(self, mock_ai):
