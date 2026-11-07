@@ -1,6 +1,7 @@
 from services.email_parser import extract_email_features
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from services.ai_service import analyse_with_ai
 
 app = Flask(__name__)
 CORS(app)
@@ -37,15 +38,15 @@ def analyse_email():
 
     # Temporary mock response.
     # The real ML model will be integrated later.
+    ai_result = analyse_with_ai(features)
+
     return jsonify({
-    "classification": "Phishing",
-    "risk_score": 91,
-    "model_status": "mock",
-    "features": features,
-    "reasons": [
-        "Mock detection result - AI not integrated"
-    ]
-})
+        "classification": ai_result["classification"],
+        "risk_score": ai_result["risk_score"],
+        "model_status": ai_result["model_status"],
+        "reasons": ai_result["reasons"],
+        "features": features
+    })
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
