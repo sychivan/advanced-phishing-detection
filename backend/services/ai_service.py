@@ -1,5 +1,6 @@
 import os
 import requests
+from .response_validator import validate_ai_response
 
 
 def analyse_with_ai(features):
@@ -22,8 +23,10 @@ def analyse_with_ai(features):
             timeout=15
         )
         response.raise_for_status()
-        return response.json()
-
+        ai_data = response.json()
+        validated_result = validate_ai_response(ai_data)
+        return validated_result
+    
     except requests.RequestException:
         return {
             "classification": "Unavailable",
@@ -33,3 +36,12 @@ def analyse_with_ai(features):
                 "AI model service is unavailable"
             ]
         }
+    except (ValueError, TypeError):
+        return {
+        "classification": "Unavailable",
+        "risk_score": None,
+        "model_status": "invalid_response",
+        "reasons": [
+            "AI model returned an invalid response"
+        ]
+    }

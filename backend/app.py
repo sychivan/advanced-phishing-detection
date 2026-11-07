@@ -1,3 +1,4 @@
+from services.response_validator import validate_ai_response
 from services.email_parser import extract_email_features
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -39,6 +40,15 @@ def analyse_email():
     # Temporary mock response.
     # The real ML model will be integrated later.
     ai_result = analyse_with_ai(features)
+
+    if ai_result.get("model_status") == "connected":
+        try:
+            ai_result = validate_ai_response(ai_result)
+        except ValueError:
+            return jsonify({
+                "error": "Invalid AI model response",
+                "model_status": "invalid_response"
+            }), 502
 
     return jsonify({
         "classification": ai_result["classification"],
