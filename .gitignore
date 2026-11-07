@@ -1,6 +1,22 @@
+# Python
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Secret keys
 .env
 .env.*
 !.env.example
-**/.venv/
-**/__pycache__/
-*.pyc
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor
+.vscode/
+
+# Temporary files
+*.log
