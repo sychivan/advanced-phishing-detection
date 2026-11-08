@@ -98,3 +98,70 @@ def get_analysis(analysis_id):
     result = dict(row)
     result["reasons"] = json.loads(result.pop("reasons_json"))
     return result
+
+def submit_feedback(analysis_id, submitted_by, suggested_label):
+    """Store a suggested correction as pending feedback."""
+    if not isinstance(submitted_by, str) or not submitted_by.strip():
+        raise ValueError("Submitter identity is required")
+
+    if suggested_label not in {"Safe", "Phishing"}:
+        raise ValueError("Suggested label must be Safe or Phishing")
+
+    with closing(connect()) as connection:
+        with connection:
+            exists = connection.execute(
+                "SELECT 1 FROM analysis_results WHERE id = ?",
+                (analysis_id,),
+            ).fetchone()
+
+            if exists is None:
+                raise ValueError("Analysis does not exist")
+
+            feedback_id = connection.execute(
+                """
+                INSERT INTO feedback
+                    (analysis_id, submitted_by, suggested_label)
+                VALUES (?, ?, ?)
+                """,
+                (analysis_id, submitted_by.strip(), suggested_label),
+            ).lastrowid
+
+    return feedback_id
+
+
+def review_feedback(feedback_id, reviewed_by, decision):
+    """Approve or reject feedback that is still pending."""
+    if not isinstance(reviewed_by, str) or not reviewed_by.strip():
+        raise ValueError("Reviewer identity is required")
+
+    if decision not in {"approved", "rejected"}:
+        raise ValueError("Decision must be approved or rejected")
+
+    with closing(connect()) as connection:
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE feedback
+                SET review_status = ?,
+                    reviewed_by = ?,
+                    reviewed_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND review_status = 'pending'
+                """,
+                (decision, reviewed_by.strip(), feedback_id),
+            )
+
+            if cursor.rowcount != 1:
+                raise ValueError(
+                    "Feedback does not exist or has already been reviewed"
+                )
+
+
+def get_feedback(feedback_id):
+    """Return one feedback record, or None."""
+    with closing(connect()) as connection:
+        row = connection.execute(
+            "SELECT * FROM feedback WHERE id = ?",
+            (feedback_id,),
+        ).fetchone()
+
+    return dict(row) if row else None

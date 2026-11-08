@@ -1,7 +1,8 @@
 # Database Design
 
-Status: SQLite prototype implemented. Saving, retrieval, and transaction
-rollback tested. Backend integration and feedback functions are pending.
+Status: SQLite prototype implemented. Analysis storage, retrieval,
+transaction rollback, and feedback submission and approval tested.
+Backend integration is pending.
 
 ## Tables
 
@@ -74,4 +75,10 @@ Foreign keys are enabled on each connection.
 Failed inserts roll back the transaction.
 
 This database is currently separate from PhishGuard/phishguard.db.
-Feedback has a table but submission and review functions are not implemented.
+Feedback functions:
+- submit_feedback(): records a suggested label as pending.
+- review_feedback(): approves or rejects pending feedback.
+- get_feedback(): retrieves a feedback record.
+
+The backend must supply authenticated identities and enforce reviewer
+permissions. Approved feedback does not automatically retrain the model.
