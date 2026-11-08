@@ -82,3 +82,13 @@ Feedback functions:
 
 The backend must supply authenticated identities and enforce reviewer
 permissions. Approved feedback does not automatically retrain the model.
+
+## Model registration and prediction storage
+
+- register_model(model_path, report_path) registers a model using its SHA-256 hash. Registering the same model again reuses its existing ID.
+- save_model_response(sender, subject, body, result) matches the response's model_version and artifact_hash to a registered model before saving.
+- Verified that a live API prediction can be saved and retrieved with matching model metadata.
+- Verified that an incorrect artifact hash is rejected without adding email or analysis records.
+
+Automatic saving through the backend endpoint is still pending integration.
+The backend must preserve model_version and artifact_hash when validating the AI response, then call save_model_response().
