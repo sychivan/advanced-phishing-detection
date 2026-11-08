@@ -20,3 +20,6 @@ __pycache__/
 
 # Temporary files
 *.log
+
+# Local training datasets
+ml/data/*.csv
