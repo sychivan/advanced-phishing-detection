@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhishGuard</title>
+<meta name="description" content="AI-powered phishing filter for your email - front end">
+<style>
+/* =========================================================
+   Design tokens (light + dark)
+   ========================================================= */
+:root{
+  --bg:#f5f7fa; --surface:#ffffff; --surface-2:#f0f3f8; --border:#dde3ec;
+  --text:#18212f; --muted:#5b6778; --primary:#2456e5; --primary-ink:#ffffff; --primary-soft:#e5ecfd;
+  --safe:#13795b; --safe-bg:#dff5ec;
+  --warn:#9a5b00; --warn-bg:#fdf0d4;
+  --danger:#b42318; --danger-bg:#fde4e1;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 4px 14px rgba(16,24,40,.06);
+  --radius:12px;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0e131b; --surface:#161d28; --surface-2:#1d2634; --border:#2a3547;
+    --text:#e8edf5; --muted:#9aa7ba; --primary:#6c93ff; --primary-ink:#0b1220; --primary-soft:#1f2c4d;
+    --safe:#4cd3a2; --safe-bg:#12352b;
+    --warn:#f4b955; --warn-bg:#3a2c10;
+    --danger:#ff8a7e; --danger-bg:#3d1b18;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 14px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;line-height:1.25}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* =========================================================
+   Buttons / form controls
+   ========================================================= */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:9px;border:1px solid var(--border);background:var(--surface);font-weight:600;font-size:14px;transition:background .15s,border-color .15s}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn.primary:hover{filter:brightness(1.08);background:var(--primary)}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.btn.danger:hover{background:var(--danger-bg)}
+.btn.safe{color:var(--safe);border-color:var(--safe)}
+.btn.safe:hover{background:var(--safe-bg)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn.sm{padding:6px 10px;font-size:13px}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.field label{font-weight:600;font-size:14px}
+.input,.select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);}
+.input:focus,.select:focus{border-color:var(--primary)}
+.error-text{color:var(--danger);font-size:13px;min-height:18px}
+
+/* =========================================================
+   Login
+   ========================================================= */
+.login-wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
+.login-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:32px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;letter-spacing:-.01em}
+.brand svg{flex:none}
+.login-card h1{font-size:22px;margin:22px 0 4px}
+.login-card p.sub{margin:0 0 22px;color:var(--muted)}
+.demo-note{margin-top:18px;padding:10px 12px;border-radius:9px;background:var(--primary-soft);font-size:13px;color:var(--text)}
+.row-between{display:flex;justify-content:space-between;align-items:center}
+.pw-wrap{position:relative}
+.pw-wrap .input{padding-right:64px}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--primary);font-weight:600;font-size:13px;padding:6px 8px}
+
+/* =========================================================
+   App shell
+   ========================================================= */
+.shell{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:20px;position:sticky;top:0;height:100vh}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;color:var(--muted);text-decoration:none;font-weight:600}
+.nav a:hover{background:var(--surface-2);color:var(--text)}
+.nav a[aria-current="page"]{background:var(--primary-soft);color:var(--primary)}
+.nav .count{margin-left:auto;background:var(--danger-bg);color:var(--danger);border-radius:999px;font-size:12px;padding:1px 8px;font-weight:700}
+.sidebar .spacer{flex:1}
+.user-box{border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:10px}
+.user-box .who{font-size:13px;color:var(--muted);word-break:break-all}
+.main{padding:28px 32px 48px;max-width:1200px;width:100%}
+.page-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:22px}
+.page-head h1{font-size:26px;letter-spacing:-.01em}
+.page-head p{margin:4px 0 0;color:var(--muted)}
+
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .sidebar{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 14px;border-right:0;border-bottom:1px solid var(--border)}
+  .nav{flex-direction:row;flex-wrap:wrap;order:3;width:100%}
+  .nav a{padding:8px 10px}
+  .sidebar .spacer{display:none}
+  .user-box{border:0;padding:0;margin-left:auto;flex-direction:row;align-items:center}
+  .user-box .who{display:none}
+  .main{padding:20px 16px 40px}
+}
+
+/* =========================================================
+   Cards / stats
+   ========================================================= */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-pad{padding:20px}
+.card h2{font-size:16px;margin-bottom:14px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px}
+.stat{padding:18px 20px}
+.stat .label{color:var(--muted);font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.stat .value{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:4px}
+.stat .hint{font-size:13px;color:var(--muted)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.dot.safe{background:var(--safe)} .dot.warn{background:var(--warn)} .dot.danger{background:var(--danger)} .dot.primary{background:var(--primary)}
+.grid-2{display:grid;grid-template-columns:1fr 1.4fr;gap:16px;margin-bottom:20px}
+@media (max-width:900px){.grid-2{grid-template-columns:1fr}}
+.donut-wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.legend{display:flex;flex-direction:column;gap:8px;font-size:14px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend b{margin-left:auto;padding-left:16px}
+.bars{display:flex;align-items:flex-end;gap:12px;height:180px;padding-top:8px}
+.bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;min-width:0}
+.bar-stack{width:100%;max-width:44px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:6px 6px 2px 2px;overflow:hidden;background:var(--surface-2);flex:1}
+.bar-stack .seg-safe{background:var(--safe)} .bar-stack .seg-bad{background:var(--danger)}
+.bar-col small{color:var(--muted);font-size:12px}
+.bar-col .n{font-size:12px;font-weight:700}
+
+/* =========================================================
+   Mail list
+   ========================================================= */
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;align-items:center}
+.toolbar .search{flex:1;min-width:220px}
+.toolbar .select{width:auto}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;color:var(--muted)}
+.chip[aria-pressed="true"]{background:var(--primary-soft);color:var(--primary);border-color:var(--primary)}
+.list{list-style:none;margin:0;padding:0}
+.item{display:grid;grid-template-columns:auto 40px 1fr auto;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer}
+.item.nocheck{grid-template-columns:40px 1fr auto}
+.item:last-child{border-bottom:0}
+.item:hover{background:var(--surface-2)}
+.avatar{width:40px;height:40px;border-radius:50%;background:var(--primary-soft);color:var(--primary);display:grid;place-items:center;font-weight:700;font-size:15px}
+.item .top{display:flex;gap:8px;align-items:baseline;min-width:0}
+.item .from{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .date{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.item .subject{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .preview{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .body-col{min-width:0}
+.score{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:92px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.pill.safe{background:var(--safe-bg);color:var(--safe)}
+.pill.suspicious{background:var(--warn-bg);color:var(--warn)}
+.pill.phishing{background:var(--danger-bg);color:var(--danger)}
+.meter{width:92px;height:6px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.meter span{display:block;height:100%;border-radius:999px}
+.meter .safe{background:var(--safe)} .meter .suspicious{background:var(--warn)} .meter .phishing{background:var(--danger)}
+.empty{padding:48px 20px;text-align:center;color:var(--muted)}
+.empty h3{color:var(--text);margin-bottom:6px}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn);margin-bottom:16px;font-size:14px}
+.bulkbar{display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--surface-2);border-radius:var(--radius) var(--radius) 0 0;flex-wrap:wrap}
+.bulkbar .sp{flex:1}
+@media (max-width:560px){
+  .item{grid-template-columns:auto 1fr auto}
+  .item.nocheck{grid-template-columns:1fr auto}
+  .avatar{display:none}
+  .score{min-width:0}
+  .meter{display:none}
+}
+
+/* =========================================================
+   Drawer (message detail)
+   ========================================================= */
+.overlay{position:fixed;inset:0;background:rgba(10,15,25,.45);z-index:40;display:none}
+.overlay.open{display:block}
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(520px,100%);background:var(--surface);border-left:1px solid var(--border);z-index:41;transform:translateX(100%);transition:transform .2s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+.drawer.open{transform:none}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none}}
+.drawer-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:18px 20px;border-bottom:1px solid var(--border)}
+.drawer-head h2{font-size:18px;word-break:break-word}
+.drawer-body{padding:20px;overflow:auto;flex:1}
+.drawer-foot{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap}
+.icon-btn{border:0;background:transparent;border-radius:8px;padding:6px 10px;font-size:20px;line-height:1;color:var(--muted)}
+.icon-btn:hover{background:var(--surface-2);color:var(--text)}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:14px;margin-bottom:18px}
+.meta dt{color:var(--muted)} .meta dd{margin:0;word-break:break-all}
+.big-score{display:flex;align-items:center;gap:16px;padding:16px;border-radius:12px;margin-bottom:18px}
+.big-score.safe{background:var(--safe-bg)} .big-score.suspicious{background:var(--warn-bg)} .big-score.phishing{background:var(--danger-bg)}
+.big-score .num{font-size:40px;font-weight:800;line-height:1}
+.big-score.safe .num,.big-score.safe .t{color:var(--safe)}
+.big-score.suspicious .num,.big-score.suspicious .t{color:var(--warn)}
+.big-score.phishing .num,.big-score.phishing .num + div .t{color:var(--danger)}
+.big-score .t{font-weight:700}
+.big-score .d{font-size:13px;color:var(--muted)}
+.signals{list-style:none;margin:0 0 18px;padding:0;display:flex;flex-direction:column;gap:8px}
+.signals li{display:flex;gap:10px;align-items:flex-start;font-size:14px;padding:8px 10px;border-radius:8px;background:var(--surface-2)}
+.sev{flex:none;font-size:11px;font-weight:800;text-transform:uppercase;padding:2px 7px;border-radius:6px;margin-top:2px}
+.sev.high{background:var(--danger-bg);color:var(--danger)} .sev.med{background:var(--warn-bg);color:var(--warn)} .sev.low{background:var(--safe-bg);color:var(--safe)}
+.h3{font-size:14px;font-weight:700;margin:0 0 8px}
+.mail-body{white-space:pre-wrap;background:var(--surface-2);border-radius:10px;padding:14px;font-size:14px;word-break:break-word;margin-bottom:18px}
+.link-list{margin:0 0 18px;padding-left:18px;font-size:13px;word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace}
+.note{font-size:12px;color:var(--muted)}
+
+/* =========================================================
+   Toast + confirm dialog
+   ========================================================= */
+.toasts{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;box-shadow:var(--shadow)}
+dialog{border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);padding:24px;max-width:420px;box-shadow:var(--shadow)}
+dialog::backdrop{background:rgba(10,15,25,.5)}
+dialog h2{font-size:18px;margin-bottom:8px}
+dialog p{margin:0 0 18px;color:var(--muted)}
+dialog .actions{display:flex;justify-content:flex-end;gap:10px}
+.loading{padding:40px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="overlay" class="overlay"></div>
+<aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true"></aside>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<dialog id="confirm"><h2 id="confirm-title"></h2><p id="confirm-msg"></p><div class="actions"><button class="btn" id="confirm-no">Cancel</button><button class="btn danger" id="confirm-yes">Confirm</button></div></dialog>
+
+<script>
+/* =============================================================================
+   PHISHGUARD - FRONT END (single file, no dependencies)
+
+   BACK-END INTEGRATION GUIDE
+   --------------------------
+   All data access goes through the `API` object below. To connect the real
+   back end:
+     1. Set CONFIG.USE_MOCK = false and CONFIG.BASE_URL to your server.
+     2. Make the server return JSON matching the shapes documented here.
+
+   Endpoints the HttpAdapter expects:
+     POST   /auth/login                 {email,password}  -> {token, user:{email,name}}
+     POST   /auth/logout
+     GET    /stats                      -> Stats
+     GET    /messages?status=inbox      -> Message[]        (delivered mail)
+     GET    /messages?status=quarantine -> Message[]        (flagged mail)
+     GET    /messages/:id               -> Message
+     POST   /messages/:id/quarantine    -> Message          (user reports as phishing)
+     POST   /messages/:id/restore       -> Message          (user marks as safe)
+     DELETE /messages/:id               -> {ok:true}        (permanent delete)
+
+   Message = {
+     id: string,
+     from: {name, email},
+     subject: string,
+     preview: string,           // short snippet
+     body: string,              // PLAIN TEXT only (it is never rendered as HTML)
+     receivedAt: ISO-8601 string,
+     score: number 0-100,       // phishing score from the AI model
+     status: "inbox" | "quarantine",
+     signals: [{label: string, severity: "low"|"med"|"high"}],  // why it scored that way
+     links: string[]            // URLs found in the email
+   }
+   Stats = { total, phishing, suspicious, safe, quarantined,
+             daily: [{date: "YYYY-MM-DD", safe: n, phishing: n}] }   // last 7 days
+
+   Verdict thresholds are client-side display only: see CONFIG.THRESHOLDS.
+   ============================================================================= */
+
+const CONFIG = {
+  USE_MOCK: true,                 // <- flip to false when the back end exists
+  BASE_URL: '/api',               // <- your API root
+  THRESHOLDS: { suspicious: 40, phishing: 70 }   // score >= value -> that verdict
+};
+
+/* ---------- tiny helpers ---------- */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const verdictOf = (score) => score >= CONFIG.THRESHOLDS.phishing ? 'phishing' : score >= CONFIG.THRESHOLDS.suspicious ? 'suspicious' : 'safe';
+const verdictLabel = { safe: 'Safe', suspicious: 'Suspicious', phishing: 'Phishing' };
+const verdictDesc = {
+  safe: 'No significant phishing indicators found.',
+  suspicious: 'Some risky signals. Treat links and attachments with caution.',
+  phishing: 'High likelihood of phishing. This email was moved to quarantine.'
+};
+const initials = (n) => (n || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+function fmtDate(iso, long) {
+  const d = new Date(iso), now = new Date();
+  if (long) return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return (now - d) < 864e5 ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+                           : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
+  $('#toasts').appendChild(t); setTimeout(() => t.remove(), 3200);
+}
+function confirmDialog(title, msg, yesLabel = 'Confirm') {
+  return new Promise(res => {
+    const dlg = $('#confirm');
+    $('#confirm-title').textContent = title; $('#confirm-msg').textContent = msg; $('#confirm-yes').textContent = yesLabel;
+    const done = (v) => { dlg.close(); $('#confirm-yes').onclick = $('#confirm-no').onclick = null; res(v); };
+    $('#confirm-yes').onclick = () => done(true); $('#confirm-no').onclick = () => done(false);
+    dlg.oncancel = () => res(false);
+    dlg.showModal();
+  });
+}
+
+/* ---------- session (token kept in memory + sessionStorage when available) ---------- */
+const Session = {
+  _mem: null,
+  get() {
+    if (this._mem) return this._mem;
+    try { const s = sessionStorage.getItem('pg_session'); if (s) this._mem = JSON.parse(s); } catch (e) {}
+    return this._mem;
+  },
+  set(v) { this._mem = v; try { sessionStorage.setItem('pg_session', JSON.stringify(v)); } catch (e) {} },
+  clear() { this._mem = null; try { sessionStorage.removeItem('pg_session'); } catch (e) {} }
+};
+
+/* =============================================================================
+   DATA LAYER
+   ============================================================================= */
+const hoursAgo = (h) => new Date(Date.now() - h * 36e5).toISOString();
+const MOCK_SEED = [
+  // [name, email, subject, hoursAgo, score, preview, signals[], links[]]
+  ['Microsoft Account Team','security@micros0ft-verify.com','Urgent: Your account will be suspended',2,96,'We detected unusual sign-in activity. Verify now to avoid suspension.',[['Sender domain mimics microsoft.com (micros0ft)','high'],['Urgent language and threat of account suspension','high'],['Link destination does not match claimed sender','high']],['http://micros0ft-verify.com/login?id=88231']],
+  ['Commonwealth Bank','alerts@cba-secure-update.net','Action required: confirm your details',5,92,'Your online banking has been limited. Confirm your identity within 24 hours.',[['Domain not owned by the real bank','high'],['Requests login credentials via link','high'],['SPF and DKIM checks failed','med']],['https://cba-secure-update.net/confirm']],
+  ['Priya Nair','priya.nair@northwind.example','Q4 budget review - agenda',3,6,'Hi team, attaching the agenda for Thursday. Let me know if you want to add anything.',[['Known sender in your contacts','low'],['SPF and DKIM passed','low']],[]],
+  ['DHL Express','tracking@dhl-parcel-delivery.top','Your parcel is on hold - pay $2.99 fee',8,88,'We attempted delivery but you need to pay a small redelivery fee.',[['Unusual top-level domain (.top)','high'],['Requests payment for redelivery','high'],['Generic greeting, no tracking number','med']],['http://dhl-parcel-delivery.top/pay']],
+  ['GitHub','noreply@github.com','[capstone-repo] New pull request #14',6,4,'frontend-dev opened a pull request: Add quarantine page.',[['Verified sender domain','low'],['SPF and DKIM passed','low']],['https://github.com/']],
+  ['HR Department','hr-benefits@company-payroll-portal.co','Updated payroll details required',11,81,'Please re-enter your bank details in the portal below to avoid payment delays.',[['Asks for bank details','high'],['External domain posing as internal HR','high'],['Sent outside business hours','low']],['https://company-payroll-portal.co/update']],
+  ['Daniel Okafor','d.okafor@partnerco.example','Re: Invoice 2204',14,47,'Hi, please see the revised invoice attached. Bank details have changed.',[['Reply thread not found in your mailbox','med'],['Mentions changed bank details','med'],['Sender seen only twice before','low']],['https://partnerco.example/invoices/2204']],
+  ['Spotify','no-reply@spotify.com','Your weekly discover is ready',20,3,'Fresh picks based on what you have been listening to.',[['Verified sender domain','low']],['https://open.spotify.com/']],
+  ['Apple Support','support@apple-id-locked.info','Your Apple ID has been locked',22,94,'Someone tried to sign in. Unlock your Apple ID now.',[['Domain impersonates Apple','high'],['Credential harvesting link','high'],['Urgent threat language','high']],['http://apple-id-locked.info/unlock']],
+  ['Library Services','library@university.example','Overdue notice: 1 item',26,18,'Your loan of "Network Security Essentials" was due yesterday.',[['Known institutional sender','low'],['Contains one link on same domain','low']],['https://library.university.example/account']],
+  ['Tom Becker','tom.becker@gmail.example','Check out this document',30,58,'I shared a document with you, open it here to view.',[['Generic message with a single link','med'],['Link uses URL shortener','med']],['https://bit.example/x7Qa2']],
+  ['PayPal','service@paypa1-resolution.com','You have received a payment dispute',33,97,'A buyer opened a dispute. Log in to respond within 24 hours.',[['Look-alike domain (paypa1)','high'],['Urgent deadline','high'],['Login link mismatch','high']],['http://paypa1-resolution.com/dispute']],
+  ['Aisha Rahman','aisha.rahman@northwind.example','Lunch Friday?',36,2,'Are you free around 12:30? Thinking of the new place on Collins St.',[['Known sender in your contacts','low']],[]],
+  ['Netflix','billing@netfIix-account.com','Payment declined - update billing',44,85,'Your subscription will be cancelled unless you update your payment method.',[['Look-alike domain (netfIix)','high'],['Requests payment info','high']],['https://netfIix-account.com/billing']],
+  ['Zoom','no-reply@zoom.example','Recording available: Capstone sync',48,8,'The cloud recording for your meeting is now available.',[['Verified sender domain','low']],['https://zoom.example/rec/abc']],
+  ['IT Helpdesk','helpdesk@company-it-support.example','Password expires in 2 days',52,63,'Your password will expire. Click here to keep your current password.',[['Generic IT notice with link','med'],['Sender domain differs from company domain','med'],['Pressure to act quickly','low']],['https://company-it-support.example/reset']],
+  ['LinkedIn','messages-noreply@linkedin.com','You appeared in 7 searches this week',60,5,'See who is looking at your profile.',[['Verified sender domain','low']],['https://linkedin.com/']],
+  ['Australia Post','notify@auspost-redelivery.xyz','Missed delivery - reschedule now',70,90,'Your package could not be delivered. Reschedule using the link below.',[['Unusual TLD (.xyz)','high'],['No tracking number given','med'],['Link mismatch','high']],['http://auspost-redelivery.xyz/r']],
+  ['Marcus Lee','marcus.lee@northwind.example','Design review notes',76,7,'Thanks everyone, notes from today are in the shared folder.',[['Known sender in your contacts','low']],[]],
+  ['Dropbox','share@dropbox-docs-view.com','Shared file: Salary_2026.pdf',90,74,'A file was shared with you. Sign in to view.',[['Domain not owned by Dropbox','high'],['Enticing file name','med'],['Requests sign-in','med']],['https://dropbox-docs-view.com/s/9ab']],
+  ['Canva','hello@canva.com','Your design was exported',100,4,'Your design "Poster v2" is ready to download.',[['Verified sender domain','low']],['https://canva.com/']],
+  ['CEO Office','ceo.office@company-exec.example','Quick favour - are you at your desk?',120,68,'I need you to purchase gift cards for a client. Reply ASAP, I am in a meeting.',[['Executive impersonation pattern','high'],['Requests gift cards','high'],['Reply-to differs from sender','med']],[]],
+  ['Sam Whitfield','sam.whitfield@northwind.example','Standup moved to 10am',140,3,'Heads up, standup is at 10 tomorrow.',[['Known sender in your contacts','low']],[]],
+  ['Westpac','security@westpac-onlinelogin.com','Your card has been blocked',150,91,'Suspicious transaction detected. Verify card details immediately.',[['Domain impersonates bank','high'],['Requests card details','high']],['http://westpac-onlinelogin.com/verify']]
+];
+
+const MockStore = {
+  msgs: null,
+  init() {
+    if (this.msgs) return;
+    this.msgs = MOCK_SEED.map((r, i) => ({
+      id: 'm' + (i + 1),
+      from: { name: r[0], email: r[1] },
+      subject: r[2],
+      receivedAt: hoursAgo(r[3]),
+      score: r[4],
+      preview: r[5],
+      body: r[5] + '\n\nThis is placeholder body text for the demo. In production the back end supplies the plain-text body of the email.\n\nRegards,\n' + r[0],
+      status: r[4] >= CONFIG.THRESHOLDS.phishing ? 'quarantine' : 'inbox',
+      signals: r[6].map(s => ({ label: s[0], severity: s[1] })),
+      links: r[7]
+    }));
+  }
+};
+const wait = (ms = 250) => new Promise(r => setTimeout(r, ms));
+
+const MockAdapter = {
+  async login(email, password) {
+    await wait(400);
+    if (!email || !password) throw new Error('Email and password are required.');
+    return { token: 'demo-token', user: { email, name: email.split('@')[0] } };
+  },
+  async logout() { await wait(100); },
+  async getStats() {
+    MockStore.init(); await wait();
+    const m = MockStore.msgs, v = (x) => verdictOf(x.score);
+    const daily = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const day = m.filter(x => new Date(x.receivedAt).toDateString() === d.toDateString());
+      daily.push({ date: key, safe: day.filter(x => v(x) !== 'phishing').length, phishing: day.filter(x => v(x) === 'phishing').length });
+    }
+    return {
+      total: m.length,
+      phishing: m.filter(x => v(x) === 'phishing').length,
+      suspicious: m.filter(x => v(x) === 'suspicious').length,
+      safe: m.filter(x => v(x) === 'safe').length,
+      quarantined: m.filter(x => x.status === 'quarantine').length,
+      daily
+    };
+  },
+  async listMessages(status) { MockStore.init(); await wait(); return MockStore.msgs.filter(x => x.status === status).map(x => ({ ...x })); },
+  async getMessage(id) { MockStore.init(); await wait(100); const x = MockStore.msgs.find(m => m.id === id); if (!x) throw new Error('Not found'); return { ...x }; },
+  async quarantine(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); x.status = 'quarantine'; x.score = Math.max(x.score, CONFIG.THRESHOLDS.phishing); return { ...x }; },
+  async restore(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); x.status = 'inbox'; x.score = Math.min(x.score, CONFIG.THRESHOLDS.suspicious - 1); return { ...x }; },
+  async remove(id) { MockStore.init(); await wait(150); MockStore.msgs = MockStore.msgs.filter(m => m.id !== id); return { ok: true }; }
+};
+
+const HttpAdapter = {
+  async _req(method, path, body) {
+    const s = Session.get();
+    const res = await fetch(CONFIG.BASE_URL + path, {
+      method, credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(s && s.token ? { Authorization: 'Bearer ' + s.token } : {}) },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (res.status === 401 && path !== '/auth/login') { Session.clear(); location.hash = '#/login'; throw new Error('Session expired. Please sign in again.'); }
+    if (!res.ok) { let msg = 'Request failed (' + res.status + ')'; try { msg = (await res.json()).message || msg; } catch (e) {} throw new Error(msg); }
+    return res.status === 204 ? {} : res.json();
+  },
+  login: (email, password) => HttpAdapter._req('POST', '/auth/login', { email, password }),
+  logout: () => HttpAdapter._req('POST', '/auth/logout'),
+  getStats: () => HttpAdapter._req('GET', '/stats'),
+  listMessages: (status) => HttpAdapter._req('GET', '/messages?status=' + encodeURIComponent(status)),
+  getMessage: (id) => HttpAdapter._req('GET', '/messages/' + encodeURIComponent(id)),
+  quarantine: (id) => HttpAdapter._req('POST', '/messages/' + encodeURIComponent(id) + '/quarantine'),
+  restore: (id) => HttpAdapter._req('POST', '/messages/' + encodeURIComponent(id) + '/restore'),
+  remove: (id) => HttpAdapter._req('DELETE', '/messages/' + encodeURIComponent(id))
+};
+const API = CONFIG.USE_MOCK ? MockAdapter : HttpAdapter;
+
+/* =============================================================================
+   SHARED UI PIECES
+   ============================================================================= */
+const ICON = {
+  logo: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="var(--primary)"/><path d="m8.5 12 2.5 2.5 4.5-5" stroke="var(--primary-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  overview: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
+  mail: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+  quarantine: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 3 20h18L12 3Z"/><path d="M12 10v4M12 17.5v.01"/></svg>'
+};
+
+let quarantineCount = null;
+function shell(active, user) {
+  const link = (href, key, label, extra = '') =>
+    `<a href="#/${href}" ${active === key ? 'aria-current="page"' : ''}>${ICON[key]}<span>${label}</span>${extra}</a>`;
+  return `
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">${ICON.logo}<span>PhishGuard</span></div>
+      <nav class="nav" aria-label="Main">
+        ${link('overview', 'overview', 'Overview')}
+        ${link('mail', 'mail', 'My Mail')}
+        ${link('quarantine', 'quarantine', 'Quarantine', quarantineCount ? `<span class="count" id="q-count">${quarantineCount}</span>` : '<span id="q-count"></span>')}
+      </nav>
+      <div class="spacer"></div>
+      <div class="user-box">
+        <div class="who">Signed in as<br><strong>${esc(user.email)}</strong></div>
+        <button class="btn sm" id="logout">Sign out</button>
+      </div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>`;
+}
+function mountShell(active) {
+  const s = Session.get();
+  $('#app').innerHTML = shell(active, s.user);
+  $('#logout').onclick = async () => { try { await API.logout(); } catch (e) {} Session.clear(); quarantineCount = null; location.hash = '#/login'; };
+  return $('#main');
+}
+function setQCount(n) {
+  quarantineCount = n;
+  const el = $('#q-count'); if (!el) return;
+  el.textContent = n || ''; el.className = n ? 'count' : '';
+}
+const scoreCell = (m) => {
+  const v = verdictOf(m.score);
+  return `<div class="score"><span class="pill ${v}">${verdictLabel[v]} &middot; ${Math.round(m.score)}</span><div class="meter" role="img" aria-label="Phishing score ${Math.round(m.score)} out of 100"><span class="${v}" style="width:${Math.max(3, m.score)}%"></span></div></div>`;
+};
+const errorBox = (msg) => `<div class="card empty"><h3>Something went wrong</h3><p>${esc(msg)}</p><button class="btn" onclick="route()">Try again</button></div>`;
+
+/* ---------- drawer ---------- */
+let drawerReturnFocus = null;
+function closeDrawer() {
+  if (!$('#drawer').classList.contains('open')) return;
+  $('#drawer').classList.remove('open'); $('#overlay').classList.remove('open');
+  $('#drawer').setAttribute('aria-hidden', 'true');
+  if (drawerReturnFocus && drawerReturnFocus.focus) drawerReturnFocus.focus();
+}
+$('#overlay').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#drawer').classList.contains('open')) closeDrawer(); });
+
+/* actions: array of {label, cls, handler(m)} */
+function openDrawer(m, actions) {
+  drawerReturnFocus = document.activeElement;
+  const v = verdictOf(m.score), d = $('#drawer');
+  d.innerHTML = `
+    <div class="drawer-head">
+      <div><div class="note">Message</div><h2 id="drawer-title">${esc(m.subject)}</h2></div>
+      <button class="icon-btn" id="drawer-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="drawer-body">
+      <div class="big-score ${v}">
+        <div class="num">${Math.round(m.score)}</div>
+        <div><div class="t">${verdictLabel[v]}</div><div class="d">${verdictDesc[v]}</div></div>
+      </div>
+      <dl class="meta">
+        <dt>From</dt><dd>${esc(m.from.name)} &lt;${esc(m.from.email)}&gt;</dd>
+        <dt>Received</dt><dd>${esc(fmtDate(m.receivedAt, true))}</dd>
+        <dt>Location</dt><dd>${m.status === 'quarantine' ? 'Quarantine' : 'Inbox'}</dd>
+      </dl>
+      <h3 class="h3">Why this score</h3>
+      <ul class="signals">${(m.signals || []).map(s => `<li><span class="sev ${esc(s.severity)}">${esc(s.severity)}</span><span>${esc(s.label)}</span></li>`).join('') || '<li>No signals available.</li>'}</ul>
+      ${m.links && m.links.length ? `<h3 class="h3">Links found (not clickable)</h3><ul class="link-list">${m.links.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
+      <h3 class="h3">Message (plain text)</h3>
+      <div class="mail-body">${esc(m.body)}</div>
+      <p class="note">Email content is shown as plain text and links are disabled to keep you safe.</p>
+    </div>
+    <div class="drawer-foot" id="drawer-actions"></div>`;
+  const foot = $('#drawer-actions', d);
+  actions.forEach(a => {
+    const b = document.createElement('button'); b.className = 'btn ' + (a.cls || ''); b.textContent = a.label;
+    b.onclick = async () => { b.disabled = true; try { await a.handler(m); } finally { b.disabled = false; } };
+    foot.appendChild(b);
+  });
+  const c = document.createElement('button'); c.className = 'btn'; c.textContent = 'Close'; c.onclick = closeDrawer; foot.appendChild(c);
+  $('#drawer-close', d).onclick = closeDrawer;
+  d.classList.add('open'); d.setAttribute('aria-hidden', 'false'); $('#overlay').classList.add('open');
+  $('#drawer-close', d).focus();
+}
+
+/* =============================================================================
+   PAGES
+   ============================================================================= */
+/* ---------- Login ---------- */
+function renderLogin() {
+  $('#app').innerHTML = `
+  <div class="login-wrap"><div class="login-card">
+    <div class="brand">${ICON.logo}<span>PhishGuard</span></div>
+    <h1>Sign in</h1>
+    <p class="sub">Protect your inbox with AI phishing detection.</p>
+    <form id="login-form" novalidate>
+      <div class="field"><label for="email">Email address</label>
+        <input class="input" id="email" type="email" autocomplete="email" placeholder="you@example.com" required></div>
+      <div class="field"><label for="password">Password</label>
+        <div class="pw-wrap"><input class="input" id="password" type="password" autocomplete="current-password" required>
+        <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password">Show</button></div></div>
+      <div class="error-text" id="login-error" role="alert"></div>
+      <button class="btn primary" id="login-btn" type="submit" style="width:100%">Sign in</button>
+    </form>
+    ${CONFIG.USE_MOCK ? '<div class="demo-note"><strong>Demo mode:</strong> no back end connected. Any valid email and password will sign you in.</div>' : ''}
+  </div></div>`;
+  $('#pw-toggle').onclick = (e) => {
+    const p = $('#password'), show = p.type === 'password';
+    p.type = show ? 'text' : 'password'; e.target.textContent = show ? 'Hide' : 'Show';
+    e.target.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  };
+  $('#login-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = $('#email').value.trim(), pw = $('#password').value, err = $('#login-error'), btn = $('#login-btn');
+    err.textContent = '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = 'Please enter a valid email address.'; $('#email').focus(); return; }
+    if (!pw) { err.textContent = 'Please enter your password.'; $('#password').focus(); return; }
+    btn.disabled = true; btn.textContent = 'Signing in...';
+    try {
+      const r = await API.login(email, pw);
+      Session.set({ token: r.token, user: r.user || { email, name: email } });
+      location.hash = '#/overview';
+    } catch (ex) {
+      err.textContent = ex.message || 'Sign in failed.'; btn.disabled = false; btn.textContent = 'Sign in';
+    }
+  };
+  $('#email').focus();
+}
+
+/* ---------- Overview ---------- */
+function donut(parts, total) {
+  const R = 52, C = 2 * Math.PI * R; let off = 0;
+  const arcs = parts.map(p => {
+    const len = total ? (p.value / total) * C : 0;
+    const s = `<circle cx="70" cy="70" r="${R}" fill="none" stroke="${p.color}" stroke-width="18" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"/>`;
+    off += len; return s;
+  }).join('');
+  return `<svg width="150" height="150" viewBox="0 0 140 140" role="img" aria-label="Breakdown of ${total} emails">
+    <circle cx="70" cy="70" r="${R}" fill="none" stroke="var(--surface-2)" stroke-width="18"/>${arcs}
+    <text x="70" y="68" text-anchor="middle" font-size="26" font-weight="800" fill="var(--text)">${total}</text>
+    <text x="70" y="86" text-anchor="middle" font-size="11" fill="var(--muted)">emails</text></svg>`;
+}
+async function renderOverview() {
+  const main = mountShell('overview');
+  main.innerHTML = '<div class="loading">Loading statistics...</div>';
+  try {
+    const [s, q] = await Promise.all([API.getStats(), API.listMessages('quarantine')]);
+    setQCount(s.quarantined);
+    const pct = (n) => s.total ? Math.round(n / s.total * 100) : 0;
+    const maxDay = Math.max(1, ...s.daily.map(d => d.safe + d.phishing));
+    const recent = q.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 4);
+    main.innerHTML = `
+      <div class="page-head"><div><h1>Overview</h1><p>Summary of all email scanned by PhishGuard.</p></div>
+        <button class="btn" id="refresh">Refresh</button></div>
+      <div class="stat-grid">
+        <div class="card stat"><div class="label"><span class="dot primary"></span>Emails scanned</div><div class="value">${s.total}</div><div class="hint">All time</div></div>
+        <div class="card stat"><div class="label"><span class="dot danger"></span>Phishing detected</div><div class="value">${s.phishing}</div><div class="hint">${pct(s.phishing)}% of all email</div></div>
+        <div class="card stat"><div class="label"><span class="dot safe"></span>Safe emails</div><div class="value">${s.safe}</div><div class="hint">${pct(s.safe)}% of all email</div></div>
+        <div class="card stat"><div class="label"><span class="dot warn"></span>Suspicious</div><div class="value">${s.suspicious}</div><div class="hint">Delivered with a warning</div></div>
+      </div>
+      <div class="grid-2">
+        <section class="card card-pad"><h2>Phishing vs safe</h2>
+          <div class="donut-wrap">${donut([
+            { value: s.safe, color: 'var(--safe)' }, { value: s.suspicious, color: 'var(--warn)' }, { value: s.phishing, color: 'var(--danger)' }], s.total)}
+            <div class="legend">
+              <div><span class="dot safe"></span>Safe<b>${s.safe}</b></div>
+              <div><span class="dot warn"></span>Suspicious<b>${s.suspicious}</b></div>
+              <div><span class="dot danger"></span>Phishing<b>${s.phishing}</b></div>
+            </div></div></section>
+        <section class="card card-pad"><h2>Last 7 days</h2>
+          <div class="bars" role="img" aria-label="Daily email counts for the last 7 days">
+            ${s.daily.map(d => {
+              const tot = d.safe + d.phishing, h = tot / maxDay * 100;
+              const day = new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' });
+              return `<div class="bar-col"><span class="n">${tot}</span>
+                <div class="bar-stack" style="height:${Math.max(h, 4)}%" title="${d.safe} safe, ${d.phishing} phishing">
+                  <div class="seg-bad" style="flex:${d.phishing}"></div><div class="seg-safe" style="flex:${d.safe}"></div></div>
+                <small>${day}</small></div>`;
+            }).join('')}
+          </div>
+          <div class="legend" style="flex-direction:row;gap:18px;margin-top:12px;font-size:13px"><div><span class="dot safe"></span>Safe</div><div><span class="dot danger"></span>Phishing</div></div>
+        </section>
+      </div>
+      <section class="card card-pad"><div class="row-between" style="margin-bottom:6px"><h2 style="margin:0">Recently quarantined</h2><a href="#/quarantine" class="btn sm">View all</a></div>
+        ${recent.length ? `<ul class="list">${recent.map(m => `
+          <li class="item nocheck" data-id="${esc(m.id)}" tabindex="0" role="button" aria-label="Open ${esc(m.subject)}">
+            <div class="avatar" aria-hidden="true">${esc(initials(m.from.name))}</div>
+            <div class="body-col"><div class="top"><span class="from">${esc(m.from.name)}</span><span class="date">${esc(fmtDate(m.receivedAt))}</span></div>
+            <div class="subject">${esc(m.subject)}</div></div>${scoreCell(m)}</li>`).join('')}</ul>` : '<div class="empty">Nothing in quarantine.</div>'}
+      </section>`;
+    $('#refresh').onclick = () => renderOverview();
+    main.querySelectorAll('.item').forEach(el => {
+      const open = () => { const m = recent.find(x => x.id === el.dataset.id); location.hash = '#/quarantine?open=' + encodeURIComponent(m.id); };
+      el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+    });
+  } catch (e) { main.innerHTML = errorBox(e.message); }
+}
+
+/* ---------- My Mail ---------- */
+const mailState = { filter: 'all', q: '', sort: 'new' };
+async function renderMail() {
+  const main = mountShell('mail');
+  main.innerHTML = '<div class="loading">Loading mail...</div>';
+  try {
+    let msgs = await API.listMessages('inbox');
+    const qList = await API.listMessages('quarantine'); setQCount(qList.length);
+
+    const draw = () => {
+      let list = msgs.filter(m => {
+        const v = verdictOf(m.score);
+        if (mailState.filter !== 'all' && v !== mailState.filter) return false;
+        const q = mailState.q.toLowerCase();
+        return !q || (m.subject + ' ' + m.from.name + ' ' + m.from.email + ' ' + m.preview).toLowerCase().includes(q);
+      });
+      list.sort(mailState.sort === 'score' ? (a, b) => b.score - a.score : (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+      $('#mail-list').innerHTML = list.length ? list.map(m => `
+        <li class="item nocheck" data-id="${esc(m.id)}" tabindex="0" role="button" aria-label="Open ${esc(m.subject)}">
+          <div class="avatar" aria-hidden="true">${esc(initials(m.from.name))}</div>
+          <div class="body-col"><div class="top"><span class="from">${esc(m.from.name)}</span><span class="date">${esc(fmtDate(m.receivedAt))}</span></div>
+          <div class="subject">${esc(m.subject)}</div><div class="preview">${esc(m.preview)}</div></div>${scoreCell(m)}</li>`).join('')
+        : '<div class="empty"><h3>No messages match</h3>Try a different filter or search term.</div>';
+      $('#mail-count').textContent = list.length + ' of ' + msgs.length + ' messages';
+      $('#mail-list').querySelectorAll('.item').forEach(el => {
+        const open = () => showMail(msgs.find(x => x.id === el.dataset.id));
+        el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
+      });
+    };
+    const showMail = (m) => openDrawer(m, [
+      ...(verdictOf(m.score) !== 'phishing' ? [{ label: 'Report as phishing', cls: 'danger', handler: async (x) => {
+        if (!await confirmDialog('Move to quarantine?', 'This email will be moved to quarantine and reported as phishing.', 'Quarantine')) return;
+        try { await API.quarantine(x.id); msgs = msgs.filter(y => y.id !== x.id); setQCount((quarantineCount || 0) + 1); closeDrawer(); draw(); toast('Moved to quarantine'); }
+        catch (e) { toast(e.message); }
+      } }] : [])
+    ]);
+
+    main.innerHTML = `
+      <div class="page-head"><div><h1>My Mail</h1><p>Delivered email with its phishing score (0 = safe, 100 = certain phishing).</p></div></div>
+      ${qList.length ? `<div class="banner" role="status"><span aria-hidden="true">&#9888;</span><span>${qList.length} flagged email${qList.length === 1 ? ' was' : 's were'} kept out of your inbox. <a href="#/quarantine" style="color:inherit;font-weight:700">Review quarantine</a></span></div>` : ''}
+      <div class="toolbar">
+        <div class="search"><label class="sr-only" for="search">Search mail</label><input class="input" id="search" type="search" placeholder="Search sender, subject or text" value="${esc(mailState.q)}"></div>
+        <div class="chips" role="group" aria-label="Filter by verdict">
+          ${[['all', 'All'], ['safe', 'Safe'], ['suspicious', 'Suspicious']].map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${mailState.filter === k}">${l}</button>`).join('')}
+        </div>
+        <label class="sr-only" for="sort">Sort</label>
+        <select class="select" id="sort"><option value="new" ${mailState.sort === 'new' ? 'selected' : ''}>Newest first</option><option value="score" ${mailState.sort === 'score' ? 'selected' : ''}>Highest score first</option></select>
+      </div>
+      <div class="note" id="mail-count" style="margin-bottom:8px" aria-live="polite"></div>
+      <div class="card"><ul class="list" id="mail-list"></ul></div>`;
+    $('#search').oninput = (e) => { mailState.q = e.target.value; draw(); };
+    $('#sort').onchange = (e) => { mailState.sort = e.target.value; draw(); };
+    main.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+      mailState.filter = c.dataset.f; main.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', x === c)); draw();
+    });
+    draw();
+  } catch (e) { main.innerHTML = errorBox(e.message); }
+}
+
+/* ---------- Quarantine ---------- */
+async function renderQuarantine(params) {
+  const main = mountShell('quarantine');
+  main.innerHTML = '<div class="loading">Loading quarantine...</div>';
+  try {
+    let msgs = await API.listMessages('quarantine');
+    msgs.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+    setQCount(msgs.length);
+    const selected = new Set();
+
+    const restoreOne = async (m) => {
+      if (!await confirmDialog('Restore this email?', 'It will be marked as safe and moved back to your inbox.', 'Restore')) return;
+      try { await API.restore(m.id); remove([m.id]); toast('Restored to inbox'); } catch (e) { toast(e.message); }
+    };
+    const deleteMany = async (ids) => {
+      if (!await confirmDialog('Delete permanently?', ids.length + ' email' + (ids.length === 1 ? '' : 's') + ' will be deleted. This cannot be undone.', 'Delete')) return;
+      try { await Promise.all(ids.map(id => API.remove(id))); remove(ids); toast('Deleted'); } catch (e) { toast(e.message); }
+    };
+    const remove = (ids) => { msgs = msgs.filter(m => !ids.includes(m.id)); ids.forEach(i => selected.delete(i)); setQCount(msgs.length); closeDrawer(); draw(); };
+    const show = (m) => openDrawer(m, [
+      { label: 'Not phishing - restore', cls: 'safe', handler: restoreOne },
+      { label: 'Delete permanently', cls: 'danger', handler: (x) => deleteMany([x.id]) }
+    ]);
+
+    function draw() {
+      const all = msgs.length && selected.size === msgs.length;
+      $('#q-body').innerHTML = !msgs.length ? '<div class="empty"><h3>Quarantine is empty</h3>Emails flagged as phishing will appear here.</div>' : `
+        <div class="bulkbar">
+          <label><input type="checkbox" id="sel-all" ${all ? 'checked' : ''}> <span>${selected.size ? selected.size + ' selected' : 'Select all'}</span></label>
+          <span class="sp"></span>
+          <button class="btn sm safe" id="bulk-restore" ${selected.size ? '' : 'disabled'}>Restore</button>
+          <button class="btn sm danger" id="bulk-delete" ${selected.size ? '' : 'disabled'}>Delete</button>
+        </div>
+        <ul class="list">${msgs.map(m => `
+          <li class="item" data-id="${esc(m.id)}" tabindex="0" role="button" aria-label="Open ${esc(m.subject)}">
+            <input type="checkbox" class="row-check" aria-label="Select ${esc(m.subject)}" ${selected.has(m.id) ? 'checked' : ''}>
+            <div class="avatar" aria-hidden="true">${esc(initials(m.from.name))}</div>
+            <div class="body-col"><div class="top"><span class="from">${esc(m.from.name)}</span><span class="date">${esc(fmtDate(m.receivedAt))}</span></div>
+              <div class="subject">${esc(m.subject)}</div><div class="preview">${esc(m.from.email)}</div></div>${scoreCell(m)}</li>`).join('')}</ul>`;
+      if (!msgs.length) return;
+      $('#sel-all').onchange = (e) => { selected.clear(); if (e.target.checked) msgs.forEach(m => selected.add(m.id)); draw(); };
+      $('#bulk-restore').onclick = async () => {
+        const ids = [...selected];
+        if (!await confirmDialog('Restore ' + ids.length + ' email(s)?', 'They will be marked as safe and moved back to your inbox.', 'Restore')) return;
+        try { await Promise.all(ids.map(id => API.restore(id))); remove(ids); toast('Restored to inbox'); } catch (e) { toast(e.message); }
+      };
+      $('#bulk-delete').onclick = () => deleteMany([...selected]);
+      main.querySelectorAll('.item').forEach(el => {
+        const id = el.dataset.id;
+        el.querySelector('.row-check').onclick = (e) => { e.stopPropagation(); e.target.checked ? selected.add(id) : selected.delete(id); draw(); };
+        const open = () => show(msgs.find(x => x.id === id));
+        el.onclick = open; el.onkeydown = e => { if (e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } };
+      });
+    }
+
+    main.innerHTML = `
+      <div class="page-head"><div><h1>Quarantine</h1><p>Emails flagged as phishing are held here instead of your inbox.</p></div></div>
+      <div class="card" id="q-body"></div>
+      <p class="note" style="margin-top:12px">Quarantined emails cannot be opened as live content. Restoring an email tells PhishGuard it was a false positive.</p>`;
+    draw();
+    const openId = params && params.get('open');
+    if (openId) { const m = msgs.find(x => x.id === openId); if (m) show(m); }
+  } catch (e) { main.innerHTML = errorBox(e.message); }
+}
+
+/* =============================================================================
+   ROUTER  (hash based: #/login  #/overview  #/mail  #/quarantine)
+   ============================================================================= */
+const ROUTES = { login: renderLogin, overview: renderOverview, mail: renderMail, quarantine: renderQuarantine };
+const TITLES = { login: 'Sign in', overview: 'Overview', mail: 'My Mail', quarantine: 'Quarantine' };
+function route() {
+  closeDrawer();
+  const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
+  let name = ROUTES[path] ? path : '';
+  const authed = !!Session.get();
+  if (!name) name = authed ? 'overview' : 'login';
+  if (!authed && name !== 'login') name = 'login';
+  if (authed && name === 'login') name = 'overview';
+  const target = '#/' + name;
+  if (!location.hash.startsWith(target)) { history.replaceState(null, '', target + (query && name === path ? '?' + query : '')); }
+  document.title = TITLES[name] + ' - PhishGuard';
+  ROUTES[name](new URLSearchParams(query || ''));
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
