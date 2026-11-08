@@ -205,3 +205,36 @@ def register_model(model_path, report_path):
                 raise ValueError("Registered model hash does not match")
 
     return row["id"]
+
+def save_model_response(sender, subject, body, result):
+    if not isinstance(result, dict):
+        raise ValueError("Model response must be an object")
+
+    if result.get("model_status") != "connected":
+        raise ValueError("Only successful model predictions can be saved")
+
+    version = result.get("model_version")
+    artifact_hash = result.get("artifact_hash")
+
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("Model version is required")
+
+    if not isinstance(artifact_hash, str) or not artifact_hash.strip():
+        raise ValueError("Model artifact hash is required")
+
+    with closing(connect()) as connection:
+        model_row = connection.execute(
+            """
+            SELECT id
+            FROM model_versions
+            WHERE version = ? AND artifact_hash = ?
+            """,
+            (version, artifact_hash),
+        ).fetchone()
+
+    if model_row is None:
+        raise ValueError("Prediction model is not registered")
+
+    return save_analysis(
+        sender, subject, body, model_row["id"], result
+    )
