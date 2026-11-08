@@ -1,6 +1,7 @@
 # Database Design
 
-Status: Draft — database engine and integration to be confirmed.
+Status: SQLite prototype implemented. Saving, retrieval, and transaction
+rollback tested. Backend integration and feedback functions are pending.
 
 ## Tables
 
@@ -49,3 +50,28 @@ Status: Draft — database engine and integration to be confirmed.
 - Failed analysis must not be stored as a successful Safe prediction.
 - Quarantine storage and audit records will be designed with the
   backend developer alongside the existing PhishGuard implementation.
+
+## Setup and Testing
+
+Run from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe database/init_db.py
+.\.venv\Scripts\python.exe database/test_storage.py
+.\.venv\Scripts\python.exe -m database.check_storage
+```
+
+The demonstration scripts add sample email and analysis records.
+The local database is database/analysis.db and is excluded from Git.
+
+## Storage Functions
+
+storage.py provides:
+- save_analysis(): saves an email and successful model prediction together.
+- get_analysis(): retrieves an analysis with its email and model details.
+
+Foreign keys are enabled on each connection.
+Failed inserts roll back the transaction.
+
+This database is currently separate from PhishGuard/phishguard.db.
+Feedback has a table but submission and review functions are not implemented.
