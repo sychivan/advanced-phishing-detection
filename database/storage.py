@@ -165,3 +165,43 @@ def get_feedback(feedback_id):
         ).fetchone()
 
     return dict(row) if row else None
+
+def register_model(model_path, report_path):
+    """Register a saved model and return its database ID."""
+    import hashlib
+
+    model_path = Path(model_path)
+    report_path = Path(report_path)
+
+    artifact_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    version = f"tfidf-logreg-{artifact_hash}"
+
+    metrics = json.loads(report_path.read_text(encoding="utf-8"))
+    if not isinstance(metrics, dict):
+        raise ValueError("Evaluation report must be a JSON object")
+
+    with closing(connect()) as connection:
+        with connection:
+            connection.execute(
+                """
+                INSERT INTO model_versions
+                    (version, artifact_hash, metrics_json)
+                VALUES (?, ?, ?)
+                ON CONFLICT(version) DO NOTHING
+                """,
+                (version, artifact_hash, json.dumps(metrics)),
+            )
+
+            row = connection.execute(
+                """
+                SELECT id, artifact_hash
+                FROM model_versions
+                WHERE version = ?
+                """,
+                (version,),
+            ).fetchone()
+
+            if row["artifact_hash"] != artifact_hash:
+                raise ValueError("Registered model hash does not match")
+
+    return row["id"]

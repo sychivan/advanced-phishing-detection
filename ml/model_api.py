@@ -1,3 +1,5 @@
+import hashlib
+from io import BytesIO
 from pathlib import Path
 
 import joblib
@@ -7,7 +9,10 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200_000
 
 BASE = Path(__file__).resolve().parent
-model = joblib.load(BASE / "models" / "phishing_model.joblib")
+model_bytes = (BASE / "models" / "phishing_model.joblib").read_bytes()
+MODEL_HASH = hashlib.sha256(model_bytes).hexdigest()
+MODEL_VERSION = f"tfidf-logreg-{MODEL_HASH}"
+model = joblib.load(BytesIO(model_bytes))
 phishing_index = list(model.classes_).index(1)
 
 
@@ -80,6 +85,8 @@ def predict():
         "risk_score": round(score, 2),
         "model_status": "connected",
         "reasons": reasons,
+        "model_version": MODEL_VERSION,
+        "artifact_hash": MODEL_HASH,
     })
 
 
