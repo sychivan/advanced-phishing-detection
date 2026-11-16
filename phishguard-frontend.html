@@ -262,11 +262,16 @@ dialog .actions{display:flex;justify-content:flex-end;gap:10px}
    Verdict thresholds are client-side display only: see CONFIG.THRESHOLDS.
    ============================================================================= */
 
+
 const CONFIG = {
-  USE_MOCK: true,                 // <- flip to false when the back end exists
-  BASE_URL: '/api',               // <- your API root
-  THRESHOLDS: { suspicious: 40, phishing: 70 }   // score >= value -> that verdict
+    USE_MOCK: false,
+    BASE_URL: 'http://127.0.0.1:5000/api',
+    THRESHOLDS: {
+        suspicious: 40,
+        phishing: 70
+    }
 };
+
 
 /* ---------- tiny helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -276,7 +281,7 @@ const verdictLabel = { safe: 'Safe', suspicious: 'Suspicious', phishing: 'Phishi
 const verdictDesc = {
   safe: 'No significant phishing indicators found.',
   suspicious: 'Some risky signals. Treat links and attachments with caution.',
-  phishing: 'High likelihood of phishing. This email was moved to quarantine.'
+  phishing: 'High likelihood of phishing. Review this email carefully and consider quarantining it.'
 };
 const initials = (n) => (n || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 function fmtDate(iso, long) {
@@ -500,9 +505,13 @@ function openDrawer(m, actions) {
         <dt>Location</dt><dd>${m.status === 'quarantine' ? 'Quarantine' : 'Inbox'}</dd>
       </dl>
       <h3 class="h3">Why this score</h3>
-      <ul class="signals">${(m.signals || []).map(s => `<li><span class="sev ${esc(s.severity)}">${esc(s.severity)}</span><span>${esc(s.label)}</span></li>`).join('') || '<li>No signals available.</li>'}</ul>
-      ${m.links && m.links.length ? `<h3 class="h3">Links found (not clickable)</h3><ul class="link-list">${m.links.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}
-      <h3 class="h3">Message (plain text)</h3>
+     
+      <ul class="signals">${(m.signals || []).map(s => {
+        const label = typeof s === 'string' ? s : s.label;
+        const severity = typeof s === 'string' ? '' : (s.severity || '');
+        return `<li><span class="sev ${esc(severity)}">${esc(severity)}</span><span>${esc(label || '')}</span></li>`;
+      }).join('') || '<li>No signals available.</li>'}</ul>
+
       <div class="mail-body">${esc(m.body)}</div>
       <p class="note">Email content is shown as plain text and links are disabled to keep you safe.</p>
     </div>
@@ -661,13 +670,40 @@ async function renderMail() {
         el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
       });
     };
-    const showMail = (m) => openDrawer(m, [
-      ...(verdictOf(m.score) !== 'phishing' ? [{ label: 'Report as phishing', cls: 'danger', handler: async (x) => {
-        if (!await confirmDialog('Move to quarantine?', 'This email will be moved to quarantine and reported as phishing.', 'Quarantine')) return;
-        try { await API.quarantine(x.id); msgs = msgs.filter(y => y.id !== x.id); setQCount((quarantineCount || 0) + 1); closeDrawer(); draw(); toast('Moved to quarantine'); }
-        catch (e) { toast(e.message); }
-      } }] : [])
+    
+const showMail = async (m) => {
+  try {
+    const detail = await API.getMessage(m.id);
+
+    openDrawer(detail, [
+      ...(detail.status === 'inbox' ? [{
+        label: 'Move to Quarantine',
+        cls: 'danger',
+        handler: async (x) => {
+          if (!await confirmDialog(
+            'Move to quarantine?',
+            'This email will be moved to quarantine and reported as phishing.',
+            'Quarantine'
+          )) return;
+
+          try {
+            await API.quarantine(x.id);
+            msgs = msgs.filter(y => y.id !== x.id);
+            setQCount((quarantineCount || 0) + 1);
+            closeDrawer();
+            draw();
+            toast('Moved to quarantine');
+          } catch (e) {
+            toast(e.message);
+          }
+        }
+      }] : [])
     ]);
+
+  } catch (e) {
+    toast('Unable to load email: ' + e.message);
+  }
+};
 
     main.innerHTML = `
       <div class="page-head"><div><h1>My Mail</h1><p>Delivered email with its phishing score (0 = safe, 100 = certain phishing).</p></div></div>

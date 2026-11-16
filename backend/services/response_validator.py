@@ -6,6 +6,8 @@ def validate_ai_response(result):
     classification = result.get("classification")
     risk_score = result.get("risk_score")
     reasons = result.get("reasons", [])
+    model_version = result.get("model_version")
+    artifact_hash = result.get("artifact_hash")
 
     allowed = {"Phishing", "Safe", "Suspicious"}
 
@@ -25,9 +27,21 @@ def validate_ai_response(result):
     ):
         raise ValueError("Reasons must be a list of strings")
 
+    if not isinstance(model_version, str) or not model_version.strip():
+        raise ValueError("Model version is required")
+
+    if (
+        not isinstance(artifact_hash, str)
+        or len(artifact_hash) != 64
+        or any(c not in "0123456789abcdefABCDEF" for c in artifact_hash)
+    ):
+        raise ValueError("Invalid model artifact hash")
+
     return {
         "classification": classification,
         "risk_score": risk_score,
         "model_status": "connected",
-        "reasons": reasons
+        "reasons": reasons,
+        "model_version": model_version,
+        "artifact_hash": artifact_hash
     }

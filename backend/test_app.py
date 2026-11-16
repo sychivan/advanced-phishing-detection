@@ -30,7 +30,9 @@ class TestBackend(unittest.TestCase):
         result = {
             "classification": "Phishing",
             "risk_score": 91,
-            "reasons": ["Suspicious link detected"]
+            "reasons": ["Suspicious link detected"],
+            "model_version": "tfidf-logreg-test",
+            "artifact_hash": "a" * 64
         }
 
         validated = validate_ai_response(result)
