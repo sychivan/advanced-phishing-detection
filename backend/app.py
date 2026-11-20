@@ -4,6 +4,7 @@ from services.email_parser import extract_email_features
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from services.ai_service import analyse_with_ai
+from services.gmail import configure as configure_gmail
 
 
 import os
@@ -39,6 +40,7 @@ active_tokens = set()
 
 
 app = Flask(__name__)
+configure_gmail(app)
 CORS(
     app,
     resources={r"/api/*": {"origins": [
@@ -437,4 +439,4 @@ def get_messages():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=not bool(os.getenv("GOOGLE_CLIENT_ID")), port=5000)

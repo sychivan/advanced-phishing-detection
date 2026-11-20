@@ -436,9 +436,9 @@ const ICON = {
 };
 
 let quarantineCount = null;
-function shell(active, user) {
-  const link = (href, key, label, extra = '') =>
-    `<a href="#/${href}" ${active === key ? 'aria-current="page"' : ''}>${ICON[key]}<span>${label}</span>${extra}</a>`;
+function shell(active, user, gmailMode = false) {
+  const link = (href, key, label, extra = '', routeKey = key) =>
+    `<a href="#/${href}" ${active === routeKey ? 'aria-current="page"' : ''}>${ICON[key]}<span>${label}</span>${extra}</a>`;
   return `
   <div class="shell">
     <aside class="sidebar">
@@ -446,10 +446,12 @@ function shell(active, user) {
       <nav class="nav" aria-label="Main">
         ${link('overview', 'overview', 'Overview')}
         ${link('mail', 'mail', 'My Mail')}
-        ${link('quarantine', 'quarantine', 'Quarantine', quarantineCount ? `<span class="count" id="q-count">${quarantineCount}</span>` : '<span id="q-count"></span>')}
+        ${link('quarantine', 'quarantine', gmailMode ? 'Flagged' : 'Quarantine',
+          quarantineCount ? `<span class="count" id="q-count">${quarantineCount}</span>` : '<span id="q-count"></span>')}
+        ${!gmailMode && !CONFIG.USE_MOCK ? link('gmail', 'mail', 'Gmail', '', 'gmail') : ''}
       </nav>
       <div class="spacer"></div>
-      <div class="user-box">
+      <div class="user-box" ${user.email ? '' : 'hidden'}>
         <div class="who">Signed in as<br><strong>${esc(user.email)}</strong></div>
         <button class="btn sm" id="logout">Sign out</button>
       </div>
@@ -547,6 +549,7 @@ function renderLogin() {
       <div class="error-text" id="login-error" role="alert"></div>
       <button class="btn primary" id="login-btn" type="submit" style="width:100%">Sign in</button>
     </form>
+    ${CONFIG.USE_MOCK ? '' : '<p style="margin:16px 0 0"><a class="btn" href="' + new URL('/gmail/connect?view=dashboard', CONFIG.BASE_URL).href + '">Sign in with Google</a></p>'}
     ${CONFIG.USE_MOCK ? '<div class="demo-note"><strong>Demo mode:</strong> no back end connected. Any valid email and password will sign you in.</div>' : ''}
   </div></div>`;
   $('#pw-toggle').onclick = (e) => {
@@ -795,15 +798,131 @@ async function renderQuarantine(params) {
 /* =============================================================================
    ROUTER  (hash based: #/login  #/overview  #/mail  #/quarantine)
    ============================================================================= */
-const ROUTES = { login: renderLogin, overview: renderOverview, mail: renderMail, quarantine: renderQuarantine };
-const TITLES = { login: 'Sign in', overview: 'Overview', mail: 'My Mail', quarantine: 'Quarantine' };
-function route() {
+async function gmailRequest(path, csrf) {
+  const response = await fetch(path, csrf ? {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body: new URLSearchParams({ csrf }),
+  } : {});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Gmail request failed.');
+  return data;
+}
+
+let gmailScan = null;
+
+function renderGmailDashboard(name, connection) {
+  const messages = gmailScan?.email === connection.email ? gmailScan.messages : [];
+  const count = label => messages.filter(message => message.classification === label).length;
+  const flagged = messages.filter(message => ['Suspicious', 'Phishing'].includes(message.classification));
+  quarantineCount = flagged.length;
+  $('#app').innerHTML = shell(name, { email: connection.email }, true);
+  const main = $('#main');
+  const rows = entries => entries.length ? `<ul class="list">${entries.map(message => `
+    <li class="item nocheck">
+      <div class="avatar" aria-hidden="true">${esc(initials(message.sender))}</div>
+      <div class="body-col">
+        <div class="subject">${esc(message.subject)}</div>
+        <div class="from">${esc(message.sender)}</div>
+        ${message.reasons.length ? `<details><summary>Why this score?</summary><ul>${
+          message.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}
+      </div>
+      <div class="score"><span class="pill ${verdictOf(message.risk_score)}">${esc(message.classification)}${
+        Number.isFinite(message.risk_score) ? ' · ' + Math.round(message.risk_score) : ''}</span></div>
+    </li>`).join('')}</ul>` : '<div class="empty">No messages to show.</div>';
+
+  const title = { overview: 'Overview', mail: 'My Mail', quarantine: 'Flagged' }[name];
+  const description = {
+    overview: 'Summary of your latest Gmail scan.',
+    mail: 'Messages from your latest Gmail scan.',
+    quarantine: 'Messages flagged for review. They stay in your Gmail inbox.'
+  }[name];
+  const stats = [
+    ['Emails scanned', messages.length, 'primary'],
+    ['Phishing detected', count('Phishing'), 'danger'],
+    ['Safe emails', count('Safe'), 'safe'],
+    ['Suspicious', count('Suspicious'), 'warn']
+  ];
+  document.title = title + ' - PhishGuard';
+  main.innerHTML = `
+    <div class="page-head"><div><h1>${title}</h1><p>${description}</p></div>
+      <button class="btn primary" id="gmail-scan">Scan up to 5 messages</button></div>
+    <p id="gmail-status" role="status"></p>
+    ${name === 'overview' ? `
+      <div class="stat-grid">${stats.map(([label, value, color]) => `
+        <div class="card stat"><div class="label"><span class="dot ${color}"></span>${label}</div>
+        <div class="value">${value}</div></div>`).join('')}</div>
+      <section class="card card-pad"><div class="row-between"><h2>Flagged messages</h2>
+        <a href="#/quarantine" class="btn sm">View all</a></div>${rows(flagged)}</section>`
+    : `<div class="card">${rows(name === 'mail' ? messages : flagged)}</div>`}`;
+  const status = $('#gmail-status');
+  const button = $('#gmail-scan');
+  button.onclick = async () => {
+    button.disabled = true;
+    status.textContent = 'Scanning your Gmail inbox…';
+    try {
+      const { messages } = await gmailRequest('/gmail/scan', connection.csrf);
+      if (!main.isConnected) return;
+      gmailScan = { email: connection.email, messages };
+      renderGmailDashboard(name, connection);
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+  $('#logout').onclick = async (event) => {
+    const logout = event.currentTarget;
+    logout.disabled = true;
+    button.disabled = true;
+    try {
+      await gmailRequest('/gmail/disconnect', connection.csrf);
+      gmailScan = null;
+      quarantineCount = null;
+      location.hash = '#/login';
+    } catch (error) {
+      status.textContent = error.message;
+      logout.disabled = false;
+      button.disabled = false;
+    }
+  };
+}
+
+function renderGmail() {
+  location.assign(new URL('/gmail/app#/overview', CONFIG.BASE_URL).href);
+}
+
+const ROUTES = { login: renderLogin, overview: renderOverview, mail: renderMail, quarantine: renderQuarantine, gmail: renderGmail };
+const TITLES = { login: 'Sign in', overview: 'Overview', mail: 'My Mail', quarantine: 'Quarantine', gmail: 'Gmail' };
+let routeVersion = 0;
+async function route() {
+  const version = ++routeVersion;
   closeDrawer();
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   let name = ROUTES[path] ? path : '';
   const authed = !!Session.get();
+  if (location.pathname === '/gmail/app' && name !== 'login') {
+    try {
+      const connection = await gmailRequest('/gmail/session');
+      if (version !== routeVersion) return;
+      if (connection.connected) {
+        if (!['overview', 'mail', 'quarantine'].includes(name)) {
+          name = 'overview';
+          history.replaceState(null, '', '#/overview');
+        }
+        renderGmailDashboard(name, connection);
+        window.scrollTo(0, 0);
+        return;
+      }
+      gmailScan = null;
+      if (name === 'gmail') name = authed ? 'overview' : 'login';
+    } catch (error) {
+      if (version === routeVersion) $('#app').innerHTML = errorBox(error.message);
+      return;
+    }
+  }
   if (!name) name = authed ? 'overview' : 'login';
-  if (!authed && name !== 'login') name = 'login';
+  if (!authed && name !== 'login' && name !== 'gmail') name = 'login';
   if (authed && name === 'login') name = 'overview';
   const target = '#/' + name;
   if (!location.hash.startsWith(target)) { history.replaceState(null, '', target + (query && name === path ? '?' + query : '')); }
