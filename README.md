@@ -131,6 +131,27 @@ Email: `demo@phishguard.local`
 
 Password: `1`
 
+### Gmail test inbox
+
+1. In Google Cloud, enable the Gmail API. Set the OAuth audience to **External** with publishing status **Testing**, and add a Gmail test account under **Test users**.
+2. Create a **Web application** OAuth client and add `http://127.0.0.1:5000/gmail/callback` under **Authorized redirect URIs**. Add the Gmail read-only scope (`https://www.googleapis.com/auth/gmail.readonly`) to the app's data access configuration.
+3. Start the ML API as above. In the backend PowerShell terminal, set:
+
+```powershell
+$env:GOOGLE_CLIENT_ID = "your-client-id"
+$env:GOOGLE_CLIENT_SECRET = "your-client-secret"
+$env:GOOGLE_REDIRECT_URI = "http://127.0.0.1:5000/gmail/callback"
+$env:AI_MODEL_URL = "http://127.0.0.1:5001/predict"
+$env:PHISHGUARD_SESSION_SECRET = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+.\.venv\Scripts\python.exe backend/app.py
+```
+
+Keep the credentials in the backend environment and out of Git. Open the frontend and select **Sign in with Google**, or open `http://127.0.0.1:5000/gmail/` directly. Sign in with the test account, grant read-only access and select **Scan up to 5 inbox messages**. PhishGuard sends message features to the configured model API. Use the local model when testing with personal mail.
+
+Gmail results appear on the Gmail scan page. The scan runs on demand and stores the access token in the backend process for the session. Restarting Flask, signing out or reaching token expiration requires reconnecting. Sign-out clears the local session. Use your Google Account settings to remove the standing grant.
+
+This is a local test flow. Public Gmail access requires Google verification for the restricted scope and a production deployment with HTTPS and managed sessions.
+
 ## 6. Main API Endpoints
 
 | Method | Endpoint | Description |
