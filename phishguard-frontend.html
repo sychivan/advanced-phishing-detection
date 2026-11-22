@@ -113,7 +113,7 @@ button{cursor:pointer}
 .stat .value{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-top:4px}
 .stat .hint{font-size:13px;color:var(--muted)}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
-.dot.safe{background:var(--safe)} .dot.warn{background:var(--warn)} .dot.danger{background:var(--danger)} .dot.primary{background:var(--primary)}
+.dot.safe{background:var(--safe)} .dot.warn{background:var(--warn)} .dot.danger{background:var(--danger)} .dot.primary{background:var(--primary)} .dot.unscored{background:var(--muted)}
 .grid-2{display:grid;grid-template-columns:1fr 1.4fr;gap:16px;margin-bottom:20px}
 @media (max-width:900px){.grid-2{grid-template-columns:1fr}}
 .donut-wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
@@ -124,6 +124,7 @@ button{cursor:pointer}
 .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end;min-width:0}
 .bar-stack{width:100%;max-width:44px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:6px 6px 2px 2px;overflow:hidden;background:var(--surface-2);flex:1}
 .bar-stack .seg-safe{background:var(--safe)} .bar-stack .seg-bad{background:var(--danger)}
+.bar-stack .seg-unscored{background:var(--muted)}
 .bar-col small{color:var(--muted);font-size:12px}
 .bar-col .n{font-size:12px;font-weight:700}
 
@@ -251,13 +252,13 @@ dialog .actions{display:flex;justify-content:flex-end;gap:10px}
      preview: string,           // short snippet
      body: string,              // PLAIN TEXT only (it is never rendered as HTML)
      receivedAt: ISO-8601 string,
-     score: number 0-100,       // phishing score from the AI model
+     score: number 0-100|null,  // null when no valid analysis is available
      status: "inbox" | "quarantine",
      signals: [{label: string, severity: "low"|"med"|"high"}],  // why it scored that way
      links: string[]            // URLs found in the email
    }
-   Stats = { total, phishing, suspicious, safe, quarantined,
-             daily: [{date: "YYYY-MM-DD", safe: n, phishing: n}] }   // last 7 days
+   Stats = { total, phishing, suspicious, safe, unscored, quarantined,
+             daily: [{date: "YYYY-MM-DD", safe: n, phishing: n, unscored: n}] }   // last 7 days
 
    Stored-message score bands match the backend dashboard counts. V1's binary prediction uses its own cutoff.
    ============================================================================= */
@@ -276,7 +277,7 @@ const CONFIG = {
 /* ---------- tiny helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const verdictOf = (score) => score >= CONFIG.THRESHOLDS.phishing ? 'phishing' : score >= CONFIG.THRESHOLDS.suspicious ? 'suspicious' : 'safe';
+const verdictOf = (score) => !Number.isFinite(score) ? 'unscored' : score >= CONFIG.THRESHOLDS.phishing ? 'phishing' : score >= CONFIG.THRESHOLDS.suspicious ? 'suspicious' : 'safe';
 const verdictLabel = { safe: 'Low score', suspicious: 'Moderate score', phishing: 'High score' };
 const verdictDesc = {
   safe: 'Below 40. Use ordinary caution with links and attachments.',
@@ -384,21 +385,23 @@ const MockAdapter = {
       const d = new Date(); d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
       const day = m.filter(x => new Date(x.receivedAt).toDateString() === d.toDateString());
-      daily.push({ date: key, safe: day.filter(x => v(x) !== 'phishing').length, phishing: day.filter(x => v(x) === 'phishing').length });
+      daily.push({ date: key, safe: day.filter(x => ['safe', 'suspicious'].includes(v(x))).length,
+        phishing: day.filter(x => v(x) === 'phishing').length, unscored: day.filter(x => v(x) === 'unscored').length });
     }
     return {
       total: m.length,
       phishing: m.filter(x => v(x) === 'phishing').length,
       suspicious: m.filter(x => v(x) === 'suspicious').length,
       safe: m.filter(x => v(x) === 'safe').length,
+      unscored: m.filter(x => v(x) === 'unscored').length,
       quarantined: m.filter(x => x.status === 'quarantine').length,
       daily
     };
   },
   async listMessages(status) { MockStore.init(); await wait(); return MockStore.msgs.filter(x => x.status === status).map(x => ({ ...x })); },
   async getMessage(id) { MockStore.init(); await wait(100); const x = MockStore.msgs.find(m => m.id === id); if (!x) throw new Error('Not found'); return { ...x }; },
-  async quarantine(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); x.status = 'quarantine'; x.score = Math.max(x.score, CONFIG.THRESHOLDS.phishing); return { ...x }; },
-  async restore(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); x.status = 'inbox'; x.score = Math.min(x.score, CONFIG.THRESHOLDS.suspicious - 1); return { ...x }; },
+  async quarantine(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); if (!x) throw new Error('Not found'); x.status = 'quarantine'; return { ...x }; },
+  async restore(id) { MockStore.init(); await wait(150); const x = MockStore.msgs.find(m => m.id === id); if (!x) throw new Error('Not found'); x.status = 'inbox'; return { ...x }; },
   async remove(id) { MockStore.init(); await wait(150); MockStore.msgs = MockStore.msgs.filter(m => m.id !== id); return { ok: true }; }
 };
 
@@ -410,7 +413,10 @@ const HttpAdapter = {
       headers: { 'Content-Type': 'application/json', ...(s && s.token ? { Authorization: 'Bearer ' + s.token } : {}) },
       body: body ? JSON.stringify(body) : undefined
     });
-    if (res.status === 401 && path !== '/auth/login') { Session.clear(); location.hash = '#/login'; throw new Error('Session expired. Please sign in again.'); }
+    if (res.status === 401 && path !== '/auth/login') {
+      if (Session.get()?.token === s?.token) { Session.clear(); location.hash = '#/login'; }
+      throw new Error('Session expired. Please sign in again.');
+    }
     if (!res.ok) {
       let message = 'Request failed (' + res.status + ')';
       try {
@@ -469,8 +475,18 @@ function shell(active, user, gmailMode = false) {
 function mountShell(active) {
   const s = Session.get();
   $('#app').innerHTML = shell(active, s.user);
-  $('#logout').onclick = async () => { try { await API.logout(); } catch (e) {} Session.clear(); quarantineCount = null; location.hash = '#/login'; };
-  return $('#main');
+  $('#logout').onclick = async () => {
+    try { await API.logout(); } catch (e) {}
+    if (Session.get()?.token !== s.token) return;
+    Session.clear(); quarantineCount = null; location.hash = '#/login';
+  };
+  const main = $('#main');
+  main.viewVersion = routeVersion;
+  main.viewSession = s;
+  return main;
+}
+function isCurrentView(main) {
+  return main.isConnected && main === $('#main') && main.viewVersion === routeVersion && main.viewSession === Session.get();
 }
 function setQCount(n) {
   quarantineCount = n;
@@ -487,10 +503,12 @@ const errorBox = (msg) => `<div class="card empty"><h3>Something went wrong</h3>
 /* ---------- drawer ---------- */
 let drawerReturnFocus = null;
 function closeDrawer() {
-  if (!$('#drawer').classList.contains('open')) return;
+  const wasOpen = $('#drawer').classList.contains('open');
   $('#drawer').classList.remove('open'); $('#overlay').classList.remove('open');
   $('#drawer').setAttribute('aria-hidden', 'true');
-  if (drawerReturnFocus && drawerReturnFocus.focus) drawerReturnFocus.focus();
+  $('#drawer').innerHTML = '';
+  if (wasOpen && drawerReturnFocus?.isConnected && drawerReturnFocus.focus) drawerReturnFocus.focus();
+  drawerReturnFocus = null;
 }
 $('#overlay').onclick = closeDrawer;
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#drawer').classList.contains('open')) closeDrawer(); });
@@ -604,9 +622,11 @@ async function renderOverview() {
   main.innerHTML = '<div class="loading">Loading statistics...</div>';
   try {
     const [s, q] = await Promise.all([API.getStats(), API.listMessages('quarantine')]);
+    if (!isCurrentView(main)) return;
     setQCount(s.quarantined);
     const pct = (n) => s.total ? Math.round(n / s.total * 100) : 0;
-    const maxDay = Math.max(1, ...s.daily.map(d => d.safe + d.phishing));
+    const unscored = s.unscored ?? 0;
+    const maxDay = Math.max(1, ...s.daily.map(d => d.safe + d.phishing + (d.unscored ?? 0)));
     const recent = q.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 4);
     main.innerHTML = `
       <div class="page-head"><div><h1>Overview</h1><p>Stored inbox and quarantine messages grouped by score. V1 reports its prediction separately, with a cutoff of 50.</p></div>
@@ -616,28 +636,32 @@ async function renderOverview() {
         <div class="card stat"><div class="label"><span class="dot danger"></span>High score</div><div class="value">${s.phishing}</div><div class="hint">70 or above · ${pct(s.phishing)}% of stored messages</div></div>
         <div class="card stat"><div class="label"><span class="dot safe"></span>Low score</div><div class="value">${s.safe}</div><div class="hint">Below 40 · ${pct(s.safe)}% of stored messages</div></div>
         <div class="card stat"><div class="label"><span class="dot warn"></span>Moderate score</div><div class="value">${s.suspicious}</div><div class="hint">40 to below 70 · ${pct(s.suspicious)}% of stored messages</div></div>
+        <div class="card stat"><div class="label"><span class="dot unscored"></span>No score</div><div class="value">${unscored}</div><div class="hint">Analysis unavailable · ${pct(unscored)}% of stored messages</div></div>
       </div>
       <div class="grid-2">
         <section class="card card-pad"><h2>Score bands</h2>
           <div class="donut-wrap">${donut([
-            { value: s.safe, color: 'var(--safe)' }, { value: s.suspicious, color: 'var(--warn)' }, { value: s.phishing, color: 'var(--danger)' }], s.total)}
+            { value: s.safe, color: 'var(--safe)' }, { value: s.suspicious, color: 'var(--warn)' },
+            { value: s.phishing, color: 'var(--danger)' }, { value: unscored, color: 'var(--muted)' }], s.total)}
             <div class="legend">
               <div><span class="dot safe"></span>Low<b>${s.safe}</b></div>
               <div><span class="dot warn"></span>Moderate<b>${s.suspicious}</b></div>
               <div><span class="dot danger"></span>High<b>${s.phishing}</b></div>
+              <div><span class="dot unscored"></span>No score<b>${unscored}</b></div>
             </div></div></section>
         <section class="card card-pad"><h2>Last 7 days</h2>
           <div class="bars" role="img" aria-label="Daily email counts for the last 7 days">
             ${s.daily.map(d => {
-              const tot = d.safe + d.phishing, h = tot / maxDay * 100;
+              const withoutScore = d.unscored ?? 0;
+              const tot = d.safe + d.phishing + withoutScore, h = tot / maxDay * 100;
               const day = new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' });
               return `<div class="bar-col"><span class="n">${tot}</span>
-                <div class="bar-stack" style="height:${Math.max(h, 4)}%" title="${d.safe} below 70, ${d.phishing} at 70 or above">
-                  <div class="seg-bad" style="flex:${d.phishing}"></div><div class="seg-safe" style="flex:${d.safe}"></div></div>
+                <div class="bar-stack" style="height:${Math.max(h, 4)}%" title="${d.safe} below 70, ${d.phishing} at 70 or above, ${withoutScore} without a score">
+                  <div class="seg-bad" style="flex:${d.phishing}"></div><div class="seg-safe" style="flex:${d.safe}"></div><div class="seg-unscored" style="flex:${withoutScore}"></div></div>
                 <small>${day}</small></div>`;
             }).join('')}
           </div>
-          <div class="legend" style="flex-direction:row;gap:18px;margin-top:12px;font-size:13px"><div><span class="dot safe"></span>Below 70</div><div><span class="dot danger"></span>70 or above</div></div>
+          <div class="legend" style="flex-direction:row;flex-wrap:wrap;gap:18px;margin-top:12px;font-size:13px"><div><span class="dot safe"></span>Below 70</div><div><span class="dot danger"></span>70 or above</div><div><span class="dot unscored"></span>No score</div></div>
         </section>
       </div>
       <section class="card card-pad"><div class="row-between" style="margin-bottom:6px"><h2 style="margin:0">Recently quarantined</h2><a href="#/quarantine" class="btn sm">View all</a></div>
@@ -652,7 +676,7 @@ async function renderOverview() {
       const open = () => { const m = recent.find(x => x.id === el.dataset.id); location.hash = '#/quarantine?open=' + encodeURIComponent(m.id); };
       el.onclick = open; el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } };
     });
-  } catch (e) { main.innerHTML = errorBox(e.message); }
+  } catch (e) { if (isCurrentView(main)) main.innerHTML = errorBox(e.message); }
 }
 
 /* ---------- My Mail ---------- */
@@ -662,16 +686,22 @@ async function renderMail() {
   main.innerHTML = '<div class="loading">Loading mail...</div>';
   try {
     let msgs = await API.listMessages('inbox');
-    const qList = await API.listMessages('quarantine'); setQCount(qList.length);
+    if (!isCurrentView(main)) return;
+    const qList = await API.listMessages('quarantine');
+    if (!isCurrentView(main)) return;
+    setQCount(qList.length);
 
     const draw = () => {
+      if (!isCurrentView(main)) return;
       let list = msgs.filter(m => {
         const v = verdictOf(m.score);
         if (mailState.filter !== 'all' && v !== mailState.filter) return false;
         const q = mailState.q.toLowerCase();
         return !q || (m.subject + ' ' + m.from.name + ' ' + m.from.email + ' ' + m.preview).toLowerCase().includes(q);
       });
-      list.sort(mailState.sort === 'score' ? (a, b) => b.score - a.score : (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+      list.sort(mailState.sort === 'score'
+        ? (a, b) => (Number.isFinite(b.score) ? b.score : -1) - (Number.isFinite(a.score) ? a.score : -1)
+        : (a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
       $('#mail-list').innerHTML = list.length ? list.map(m => `
         <li class="item nocheck" data-id="${esc(m.id)}" tabindex="0" role="button" aria-label="Open ${esc(m.subject)}">
           <div class="avatar" aria-hidden="true">${esc(initials(m.from.name))}</div>
@@ -688,6 +718,7 @@ async function renderMail() {
 const showMail = async (m) => {
   try {
     const detail = await API.getMessage(m.id);
+    if (!isCurrentView(main)) return;
 
     openDrawer(detail, [
       ...(detail.status === 'inbox' ? [{
@@ -698,24 +729,25 @@ const showMail = async (m) => {
             'Move to quarantine?',
             'This email will move to quarantine. Its V1 prediction will stay the same.',
             'Quarantine'
-          )) return;
+          ) || !isCurrentView(main)) return;
 
           try {
             await API.quarantine(x.id);
+            if (!isCurrentView(main)) return;
             msgs = msgs.filter(y => y.id !== x.id);
             setQCount((quarantineCount || 0) + 1);
             closeDrawer();
             draw();
             toast('Moved to quarantine');
           } catch (e) {
-            toast(e.message);
+            if (isCurrentView(main)) toast(e.message);
           }
         }
       }] : [])
     ]);
 
   } catch (e) {
-    toast('Unable to load email: ' + e.message);
+    if (isCurrentView(main)) toast('Unable to load email: ' + e.message);
   }
 };
 
@@ -725,7 +757,7 @@ const showMail = async (m) => {
       <div class="toolbar">
         <div class="search"><label class="sr-only" for="search">Search mail</label><input class="input" id="search" type="search" placeholder="Search sender, subject or text" value="${esc(mailState.q)}"></div>
         <div class="chips" role="group" aria-label="Filter by score band">
-          ${[['all', 'All'], ['safe', 'Low'], ['suspicious', 'Moderate'], ['phishing', 'High']].map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${mailState.filter === k}">${l}</button>`).join('')}
+          ${[['all', 'All'], ['safe', 'Low'], ['suspicious', 'Moderate'], ['phishing', 'High'], ['unscored', 'No score']].map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${mailState.filter === k}">${l}</button>`).join('')}
         </div>
         <label class="sr-only" for="sort">Sort</label>
         <select class="select" id="sort"><option value="new" ${mailState.sort === 'new' ? 'selected' : ''}>Newest first</option><option value="score" ${mailState.sort === 'score' ? 'selected' : ''}>Highest score first</option></select>
@@ -738,7 +770,7 @@ const showMail = async (m) => {
       mailState.filter = c.dataset.f; main.querySelectorAll('.chip').forEach(x => x.setAttribute('aria-pressed', x === c)); draw();
     });
     draw();
-  } catch (e) { main.innerHTML = errorBox(e.message); }
+  } catch (e) { if (isCurrentView(main)) main.innerHTML = errorBox(e.message); }
 }
 
 /* ---------- Quarantine ---------- */
@@ -747,43 +779,69 @@ async function renderQuarantine(params) {
   main.innerHTML = '<div class="loading">Loading quarantine...</div>';
   try {
     let msgs = await API.listMessages('quarantine');
+    if (!isCurrentView(main)) return;
     msgs.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
     setQCount(msgs.length);
     const selected = new Set();
+    let changing = false;
+
+    const changeMany = async (ids, action, pastTense) => {
+      if (!ids.length || changing || !isCurrentView(main)) return;
+      changing = true;
+      draw();
+      const outcomes = await Promise.allSettled(ids.map(id => action(id)));
+      changing = false;
+      if (!isCurrentView(main)) return;
+      const completed = ids.filter((_id, index) => outcomes[index].status === 'fulfilled');
+      const failures = outcomes.filter(outcome => outcome.status === 'rejected');
+      remove(completed);
+      if (failures.length) {
+        toast(`${completed.length} of ${ids.length} ${pastTense.toLowerCase()}. ${failures.length} failed: ${failures[0].reason?.message || 'Please try again.'}`);
+      } else {
+        toast(pastTense === 'Restored' ? 'Restored to inbox' : pastTense);
+      }
+    };
 
     const restoreOne = async (m) => {
-      if (!await confirmDialog('Restore this email?', 'This email will return to your inbox with its existing V1 prediction.', 'Restore')) return;
-      try { await API.restore(m.id); remove([m.id]); toast('Restored to inbox'); } catch (e) { toast(e.message); }
+      if (changing || !await confirmDialog('Restore this email?', 'This email will return to your inbox with its existing V1 prediction.', 'Restore')) return;
+      await changeMany([m.id], API.restore, 'Restored');
     };
     const deleteMany = async (ids) => {
-      if (!await confirmDialog('Delete permanently?', ids.length + ' email' + (ids.length === 1 ? '' : 's') + ' will be deleted. This cannot be undone.', 'Delete')) return;
-      try { await Promise.all(ids.map(id => API.remove(id))); remove(ids); toast('Deleted'); } catch (e) { toast(e.message); }
+      if (changing || !await confirmDialog('Delete permanently?', ids.length + ' email' + (ids.length === 1 ? '' : 's') + ' will be deleted. This cannot be undone.', 'Delete')) return;
+      await changeMany(ids, API.remove, 'Deleted');
     };
-    const remove = (ids) => { msgs = msgs.filter(m => !ids.includes(m.id)); ids.forEach(i => selected.delete(i)); setQCount(msgs.length); closeDrawer(); draw(); };
+    const remove = (ids) => {
+      if (!isCurrentView(main)) return;
+      msgs = msgs.filter(m => !ids.includes(m.id));
+      ids.forEach(i => selected.delete(i));
+      setQCount(msgs.length); closeDrawer(); draw();
+    };
     const show = async (m) => {
       try {
         const detail = await API.getMessage(m.id);
+        if (!isCurrentView(main)) return;
         openDrawer(detail, [
           { label: 'Restore to inbox', cls: 'safe', handler: restoreOne },
           { label: 'Delete permanently', cls: 'danger', handler: (x) => deleteMany([x.id]) }
         ]);
       } catch (e) {
-        toast('Unable to load email: ' + e.message);
+        if (isCurrentView(main)) toast('Unable to load email: ' + e.message);
       }
     };
 
     function draw() {
+      if (!isCurrentView(main)) return;
       const all = msgs.length && selected.size === msgs.length;
       $('#q-body').innerHTML = !msgs.length ? '<div class="empty"><h3>Quarantine is empty</h3>Messages moved to quarantine will appear here.</div>' : `
         <div class="bulkbar">
-          <label><input type="checkbox" id="sel-all" ${all ? 'checked' : ''}> <span>${selected.size ? selected.size + ' selected' : 'Select all'}</span></label>
+          <label><input type="checkbox" id="sel-all" ${all ? 'checked' : ''} ${changing ? 'disabled' : ''}> <span>${selected.size ? selected.size + ' selected' : 'Select all'}</span></label>
           <span class="sp"></span>
-          <button class="btn sm safe" id="bulk-restore" ${selected.size ? '' : 'disabled'}>Restore</button>
-          <button class="btn sm danger" id="bulk-delete" ${selected.size ? '' : 'disabled'}>Delete</button>
+          <button class="btn sm safe" id="bulk-restore" ${selected.size && !changing ? '' : 'disabled'}>Restore</button>
+          <button class="btn sm danger" id="bulk-delete" ${selected.size && !changing ? '' : 'disabled'}>Delete</button>
         </div>
         <ul class="list">${msgs.map(m => `
           <li class="item" data-id="${esc(m.id)}" tabindex="0" role="button" aria-label="Open ${esc(m.subject)}">
-            <input type="checkbox" class="row-check" aria-label="Select ${esc(m.subject)}" ${selected.has(m.id) ? 'checked' : ''}>
+            <input type="checkbox" class="row-check" aria-label="Select ${esc(m.subject)}" ${selected.has(m.id) ? 'checked' : ''} ${changing ? 'disabled' : ''}>
             <div class="avatar" aria-hidden="true">${esc(initials(m.from.name))}</div>
             <div class="body-col"><div class="top"><span class="from">${esc(m.from.name)}</span><span class="date">${esc(fmtDate(m.receivedAt))}</span></div>
               <div class="subject">${esc(m.subject)}</div><div class="preview">${esc(m.from.email)}</div></div>${scoreCell(m)}</li>`).join('')}</ul>`;
@@ -791,8 +849,8 @@ async function renderQuarantine(params) {
       $('#sel-all').onchange = (e) => { selected.clear(); if (e.target.checked) msgs.forEach(m => selected.add(m.id)); draw(); };
       $('#bulk-restore').onclick = async () => {
         const ids = [...selected];
-        if (!await confirmDialog('Restore ' + ids.length + ' email(s)?', 'These emails will return to your inbox with their existing V1 predictions.', 'Restore')) return;
-        try { await Promise.all(ids.map(id => API.restore(id))); remove(ids); toast('Restored to inbox'); } catch (e) { toast(e.message); }
+        if (changing || !await confirmDialog('Restore ' + ids.length + ' email(s)?', 'These emails will return to your inbox with their existing V1 predictions.', 'Restore')) return;
+        await changeMany(ids, API.restore, 'Restored');
       };
       $('#bulk-delete').onclick = () => deleteMany([...selected]);
       main.querySelectorAll('.item').forEach(el => {
@@ -810,7 +868,7 @@ async function renderQuarantine(params) {
     draw();
     const openId = params && params.get('open');
     if (openId) { const m = msgs.find(x => x.id === openId); if (m) await show(m); }
-  } catch (e) { main.innerHTML = errorBox(e.message); }
+  } catch (e) { if (isCurrentView(main)) main.innerHTML = errorBox(e.message); }
 }
 
 /* =============================================================================

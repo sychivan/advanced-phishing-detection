@@ -7,15 +7,16 @@ PhishGuard analyses submitted email text with the saved AI V1 model. The dashboa
 - `backend/app.py` runs the Flask API and serves `phishguard-frontend.html`.
 - `ml/model_api.py` serves V1 predictions from the existing model artifact.
 - `database/` contains the SQLite schema and storage code. Manual analyses and feedback are stored there. Gmail scan results stay in the Gmail view.
-- `PhishGuard/` is a separate prototype with its own setup.
+- `PhishGuard/` and `archive/` retain earlier prototypes. They are not the final demo: the former can modify real mailboxes and call an external model; the current V1 workflow does neither. See the [component inventory](archive/README.md).
+- `scripts/verify_project.py` copies source into a temporary directory and checks the current runtime without private configuration or mailbox access.
 
 ## Install
 
-Use Windows PowerShell, Python 3.15.2, and Node.js for the dashboard tests. From the repository root, create a virtual environment only if one has not already been set up.
+The current checkout was verified with Python **3.12.14**, Node.js **24.22.3**, and the saved artifact’s matching scikit-learn **1.9.1**. The earlier Windows rehearsal used Python 3.15.2; it is not a portable installation prerequisite. Use the checked dependency files and a supported Python environment. The following commands use Windows PowerShell. From the repository root, create a virtual environment only if one has not already been set up.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt -r ml/requirements.txt pytest
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt -r ml/requirements.txt -r requirements-dev.txt
 ```
 
 ### Select the interpreter in each demo terminal
@@ -87,19 +88,27 @@ Omit the export option to use hidden local prompts. Restart Flask to load newly 
 
 ## Tests
 
-Run the shared suites from an isolated copy of the repository without the private local configuration. Point `PHISHGUARD_DB_PATH` at a disposable SQLite file and keep real credentials out of the test process. The tests mock Google.
+The recommended verification command creates disposable copies, excludes private configuration, credentials, local databases and CSV datasets, blocks Python network access except the loopback HTTP smoke test, and runs backend, ML, database, legacy-regression and JavaScript suites. It also checks both SQLite startup paths and the real Flask → V1 → SQLite workflow. It does not train models, evaluate a corpus, contact Google, or send email.
+
+```powershell
+& $DemoPython scripts/verify_project.py
+```
+
+Logs are saved under the ignored `verification-results/` directory. A failed step produces a nonzero final exit code. Install the development requirements and ensure Node.js is on PATH. For individual suites, run the shared checks from an isolated copy of the repository without the private local configuration. Point `PHISHGUARD_DB_PATH` at a disposable SQLite file and keep real credentials out of the test process. The tests mock Google.
 
 ```powershell
 & $DemoPython -m pytest backend -q --tb=short -p no:cacheprovider
 node --test backend/test_gmail_dashboard.cjs
 ```
 
-Avoid repository-wide test discovery. The legacy SQLite smoke scripts write records, and the ML audit scripts can run dataset evaluations. See [safe SQLite verification](database/README.md#setup-and-testing) and [E11 evidence](backend/evidence/E11-20261122-122951-share/README.md) for the broader isolated run, which also included local ML regression suites.
+Prefer the scoped runner above. The standalone SQLite smoke scripts are now import-safe, but intentionally write synthetic records when executed, so use a disposable database. See [safe SQLite verification](database/README.md#setup-and-testing). The older [E11 evidence](backend/evidence/E11-20261122-122951-share/README.md) recorded 74 Python cases plus 12 subtests from a broader local workspace: several named experimental suites are absent from this repository. Those historical totals are not the fresh checkout total.
+
+Fresh checked results: **80 Python cases +39 subtests,18 JavaScript cases, two SQLite checks and real loopback HTTP passed**. See [E13 evidence and limits](backend/evidence/E13-20261122-checkout/README.md).
 
 ## Limits and documentation
 
 - V1 uses text and its binary cutoff is **50**. It can flag legitimate messages and does not verify sender identity or attachments.
-- The stored-message dashboard groups scores at **40 and 70**. Its percentages are shares of stored messages in those bands. Model accuracy requires labelled evaluation data.
+- The stored-message dashboard groups valid scores at **40 and 70**, and shows **No score** for unanalysed records. Its percentages use all stored messages, including unscored records, as the denominator. These are display bands, distinct from the model’s binary cutoff of 50. Model accuracy requires labelled evaluation data.
 - Authentication and OAuth sessions are intended for a local demo. Restarting Flask requires signing in again.
 
 [Demo script and backend contribution](backend/CAPSTONE_2_DEMO.md) · [API reference](backend/CAPSTONE_2_DEMO.md#api-reference) · [Database](database/README.md) · [V1 and ML notes](ml/README.md)

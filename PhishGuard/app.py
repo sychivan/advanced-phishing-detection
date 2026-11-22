@@ -43,12 +43,16 @@ def loop(n):
         with db() as c: ids = [r["id"] for r in c.execute("SELECT id FROM accounts")]
         for i in ids:
             try: scan_account(i)
-            except Exception as e: app.logger.warning("scan failed: %s", e)
+            except Exception as e: app.logger.warning("scan failed: %s", type(e).__name__)
 
 def csrf():
     session.setdefault("csrf", secrets.token_urlsafe(16)); return session["csrf"]
 def check():
-    if request.form.get("csrf") != session.get("csrf"): abort(400)
+    expected, supplied = session.get("csrf"), request.form.get("csrf")
+    if (not isinstance(expected, str) or not expected
+            or not isinstance(supplied, str) or not supplied
+            or not secrets.compare_digest(expected.encode("utf-8"), supplied.encode("utf-8"))):
+        abort(400)
 
 PAGE = """<!doctype html><title>PhishGuard</title><meta name=viewport content="width=device-width,initial-scale=1">
 <style>body{font:15px system-ui;max-width:960px;margin:20px auto;padding:0 14px;color:#1b1f27}table{width:100%;border-collapse:collapse}

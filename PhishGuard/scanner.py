@@ -10,6 +10,13 @@ BRANDS = {"paypal": "paypal.com", "microsoft": "microsoft.com", "apple": "apple.
 legit = lambda d, b: d == b or d.endswith("." + b)
 norm = lambda s: s.replace("1", "l").replace("0", "o").replace("3", "e")
 
+def hostname(url):
+    """Malformed untrusted links must not abort analysis of the whole email."""
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
 def parse(raw: bytes):
     m = email.message_from_bytes(raw, policy=policy.default)
     def body(pref):
@@ -32,7 +39,7 @@ def rules(m, text, html, atts):
     if rd and fd and rd != fd: add(20, f"Reply-To domain ({rd}) differs from sender ({fd})", True)
     allt = text + " " + html
     links = list(dict.fromkeys(re.findall(r"https?://[^\s<>\"')\]]+", allt)))
-    hosts = [(urlparse(u).hostname or "").lower() for u in links]
+    hosts = [hostname(u) for u in links]
     for b, dom in BRANDS.items():
         if re.search(rf"\b{b}\b", name.lower() + " " + subj) and fd and not legit(fd, dom):
             add(30, f"Claims to be “{b}” but sender domain is {fd}", True); break
@@ -51,7 +58,7 @@ def rules(m, text, html, atts):
     for href, txt in re.findall(r"<a\s[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", html, re.I | re.S):
         t = re.sub(r"<[^>]+>", "", txt).strip()
         if re.match(r"(https?://)?[\w.-]+\.[a-z]{2,}", t, re.I):
-            th = urlparse(t if t.startswith("http") else "http://" + t).hostname; hh = urlparse(href).hostname
+            th = hostname(t if re.match(r"https?://", t, re.I) else "http://" + t); hh = hostname(href)
             if th and hh and th != hh: add(25, f"Link text shows {th} but goes to {hh}", True)
     for a in atts:
         if re.search(r"\.(exe|scr|js|vbs|iso|img|lnk|docm|xlsm|html?|zip|rar|7z)(\.|$)", a, re.I): add(25, f"Risky attachment: {a}", True)
@@ -69,7 +76,7 @@ def ask_claude(m, text, flags):
         j = json.loads(re.search(r"\{.*\}", r.content[0].text, re.S).group())
         return {"score": max(0, min(100, int(j["score"]))), "verdict": str(j.get("verdict", "")), "reasons": [str(x) for x in j.get("reasons", [])[:4]]}
     except Exception as e:
-        print("CLAUDE ERROR:", type(e).__name__, str(e))
+        print("CLAUDE ERROR:", type(e).__name__)
         return None
 
 def analyze(raw: bytes):

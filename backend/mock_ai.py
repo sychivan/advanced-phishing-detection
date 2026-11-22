@@ -1,4 +1,9 @@
 
+"""Legacy contract-test stub, not V1 or a valid persisted model response.
+
+Its deliberately incomplete/invalid results exercise integration failures.
+Run ml/model_api.py for the final demonstration and genuine model metadata.
+"""
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)

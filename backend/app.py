@@ -1,11 +1,13 @@
 
 import os
+import math
 import re
 import secrets
 import sqlite3
 import sys
 import time
 from functools import wraps
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
@@ -130,6 +132,24 @@ def require_admin(func):
     return wrapper
 
 
+def require_record_id(func):
+    """Reject IDs SQLite cannot represent before opening a database query."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if any(not 1 <= value <= MAX_SQLITE_ID for value in kwargs.values()):
+            return jsonify({"message": "Record not found"}), 404
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def score_band(score):
+    """Keep missing/invalid scores separate from a genuine low score of zero."""
+    if type(score) not in (int, float) or not 0 <= score <= 100 or not math.isfinite(score):
+        return "unscored"
+    return "phishing" if score >= 70 else "suspicious" if score >= 40 else "safe"
+
+
 @app.route("/api/feedback", methods=["POST"])
 @require_auth
 def create_feedback():
@@ -180,6 +200,7 @@ def create_feedback():
 
 @app.route("/api/feedback/<int:feedback_id>", methods=["GET"])
 @require_auth
+@require_record_id
 def view_feedback(feedback_id):
     try:
         feedback = get_feedback(feedback_id)
@@ -200,6 +221,7 @@ def view_feedback(feedback_id):
 
 @app.route("/api/feedback/<int:feedback_id>/review", methods=["POST"])
 @require_admin
+@require_record_id
 def review_feedback_api(feedback_id):
     data = request.get_json(silent=True)
 
@@ -359,39 +381,31 @@ def get_stats():
 
         total = len(messages)
 
-        phishing = sum(
-            1 for m in messages if m["score"] >= 70
-        )
-        suspicious = sum(
-            1 for m in messages if 40 <= m["score"] < 70
-        )
-        safe = sum(
-            1 for m in messages if m["score"] < 40
-        )
+        counts = {name: 0 for name in ("safe", "suspicious", "phishing", "unscored")}
+        for message in messages:
+            counts[score_band(message.get("score"))] += 1
 
-        from datetime import datetime, timedelta
-
-        today = datetime.now().date()
+        # SQLite's created_at timestamps (exposed as receivedAt) use UTC as well.
+        today = datetime.now(timezone.utc).date()
         daily = []
 
         for i in range(6, -1, -1):
             day = today - timedelta(days=i)
             day_messages = [
                 m for m in messages
-                if m["receivedAt"][:10] == day.isoformat()
+                if str(m.get("receivedAt", ""))[:10] == day.isoformat()
             ]
 
             daily.append({
                 "date": day.isoformat(),
-                "safe": sum(1 for m in day_messages if m["score"] < 70),
-                "phishing": sum(1 for m in day_messages if m["score"] >= 70)
+                "safe": sum(1 for m in day_messages if score_band(m.get("score")) in ("safe", "suspicious")),
+                "phishing": sum(1 for m in day_messages if score_band(m.get("score")) == "phishing"),
+                "unscored": sum(1 for m in day_messages if score_band(m.get("score")) == "unscored")
             })
 
         return jsonify({
             "total": total,
-            "phishing": phishing,
-            "suspicious": suspicious,
-            "safe": safe,
+            **counts,
             "quarantined": len(quarantine),
             "daily": daily
         }), 200
@@ -404,6 +418,7 @@ def get_stats():
 
 @app.route("/api/messages/<int:message_id>/quarantine", methods=["POST"])
 @require_auth
+@require_record_id
 def quarantine_email(message_id):
     try:
         message = quarantine_message(message_id)
@@ -419,9 +434,10 @@ def quarantine_email(message_id):
 
 @app.route("/api/messages/<int:message_id>/restore", methods=["POST"])
 @require_auth
+@require_record_id
 def restore_email(message_id):
     try:
-        message = restore_message(message_id)
+        message = restore_message(message_id, submitted_by=DEMO_EMAIL)
         return jsonify(message), 200
 
     except ValueError as error:
@@ -434,6 +450,7 @@ def restore_email(message_id):
 
 @app.route("/api/messages/<int:message_id>", methods=["GET"])
 @require_auth
+@require_record_id
 def get_message(message_id):
     try:
         message = get_message_by_id(message_id)
@@ -450,6 +467,7 @@ def get_message(message_id):
 
 @app.route("/api/messages/<int:message_id>", methods=["DELETE"])
 @require_auth
+@require_record_id
 def delete_email(message_id):
     try:
         result = delete_message(message_id)

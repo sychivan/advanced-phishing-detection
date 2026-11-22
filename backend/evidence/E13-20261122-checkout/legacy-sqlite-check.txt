@@ -1,0 +1,7 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python database/test_storage.py
+PASS: Saved and retrieved a synthetic prediction from the existing model
+Analysis ID: 1
+Classification: Phishing
+Model score: 80.91
+
+Exit code: 0

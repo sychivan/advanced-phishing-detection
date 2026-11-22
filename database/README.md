@@ -1,94 +1,64 @@
-# Database Design
+# Database design and verification
 
-Status: SQLite prototype implemented. Analysis storage, retrieval,
-transaction rollback, and feedback submission and approval tested.
-Backend integration is pending.
+The Flask backend uses this SQLite layer for saved manual analyses, local inbox and quarantine actions, and feedback. Gmail scan results stay in the Gmail view and are not inserted into these tables. The separate prototype database under `PhishGuard/` is not part of this storage path.
 
-## Tables
+## Tables and timestamps
 
-### emails
-- id: primary key
-- sender: sender email address
-- subject: email subject
-- body: email text
-- created_at: time the application stored the email
+| Table | Stored data |
+| --- | --- |
+| `emails` | Sender, subject, body, insertion time and local status (`inbox` or `quarantine`). |
+| `model_versions` | Unique version, artifact SHA-256, optional training time and supplied evaluation JSON. |
+| `analysis_results` | Email and model references, classification, score, reasons and analysis time. |
+| `feedback` | Suggested correction, submitter, pending/approved/rejected state and review identity/time. |
 
-### model_versions
-- id: primary key
-- version: unique model version
-- artifact_hash: hash identifying the saved model file
-- trained_at: model training time
-- metrics_json: model evaluation results
+One email may have several analyses; one model may produce many analyses; an analysis may receive several feedback records. Foreign keys are enabled on every storage connection. Classification accepts Safe, Suspicious or Phishing for compatibility; the current V1 model returns only Safe or Phishing.
 
-### analysis_results
-- id: primary key
-- email_id: foreign key referencing emails
-- model_version_id: foreign key referencing model_versions
-- classification: Safe, Suspicious, or Phishing
-- risk_score: model score between 0 and 100
-- reasons_json: explanation list
-- analysed_at: analysis time
+`created_at` records when the application inserted the local email, not when the original email was received. The API exposes this value as `receivedAt`. SQLite's `CURRENT_TIMESTAMP` values use UTC. `analysed_at` records analysis insertion time; ties use the analysis ID. The existing registration function does not populate `trained_at`, so a training date must not be inferred from it.
 
-### feedback
-- id: primary key
-- analysis_id: foreign key referencing analysis_results
-- submitted_by: reference to an authenticated user
-- suggested_label: Safe or Phishing
-- review_status: pending, approved, or rejected
-- reviewed_by: reference to the reviewer
-- created_at: submission time
-- reviewed_at: review time, initially empty
+## Stored-message behavior
 
-## Relationships
-- One email can have multiple analysis results.
-- One model version can produce multiple analysis results.
-- One analysis result can receive multiple feedback entries.
+`save_analysis()` saves the email and successful analysis in one transaction. Invalid model references roll back the email insert. `save_model_response()` also requires the response's model version and artifact hash to match a registered model.
 
-## Implementation Notes
-- User references must match the backend's account system.
-- Predictions remain separate from user feedback.
-- Only approved feedback is eligible for future training.
-- Failed analysis must not be stored as a successful Safe prediction.
-- Quarantine storage and audit records will be designed with the
-  backend developer alongside the existing PhishGuard implementation.
+`list_messages()`, `get_message_by_id()` and restoration select the same latest analysis, ordered by `analysed_at` and then ID. A message without an analysis has a null score and classification; it must not be displayed as zero-risk or Safe. List and detail responses retain the model's reasons.
 
-## Setup and Testing
+Quarantine and restore change local status without changing the prediction or score. Restoring a Phishing result can add pending Safe feedback when the backend supplies the authenticated submitter; repeated restoration reuses an existing pending correction. Restoring a Safe result does not create that correction. A direct storage call without an identity restores the record without inventing a submitter. Deletion removes related feedback and analysis rows together with the email.
 
-From the repository root, select `$DemoPython` using the [main README](../README.md#select-the-interpreter-in-each-demo-terminal). Run the storage check against a new disposable path.
+The backend authenticates users and enforces reviewer permissions. Feedback is a human suggestion, separate from the model prediction. Approval does not automatically retrain the model.
+
+## Setup
+
+From the repository root, select `$DemoPython` using the [main README](../README.md#select-the-interpreter-in-each-demo-terminal). Set `PHISHGUARD_DB_PATH` before starting the backend or importing the storage module.
+
+```powershell
+$env:PHISHGUARD_DB_PATH = Join-Path $PWD '.venv/phishguard-demo.sqlite3'
+& $DemoPython -m backend.setup_db
+```
+
+Setup creates the schema and registers the existing V1 artifact; it preserves existing rows and does not seed demonstration messages. The default path is `database/analysis.db`. Database files are excluded from Git. Re-running schema setup is idempotent, but it is not a migration of an incompatible older schema.
+
+## Disposable verification
+
+The regression suite creates its own temporary databases and does not load private local configuration:
+
+```powershell
+& $DemoPython -m pytest database/test_storage_regressions.py -q -p no:cacheprovider
+```
+
+For explicit saved-model smoke checks, use a fresh disposable path:
 
 ```powershell
 $env:PHISHGUARD_DB_PATH = Join-Path $env:TEMP ("phishguard-sqlite-test-{0}.sqlite3" -f [guid]::NewGuid())
-& $DemoPython -m backend.setup_db
+& $DemoPython -m database.test_storage
 & $DemoPython -m database.check_storage
+Remove-Item Env:PHISHGUARD_DB_PATH
 ```
 
-The check inserts a synthetic message, verifies it and confirms rollback for an invalid model reference. The default local database is `database/analysis.db` and is excluded from Git.
+The first script saves and retrieves a synthetic prediction through SQLite. The second uses the storage helpers and verifies foreign-key rollback. Both initialize the chosen path and use the saved V1 model. If the environment override is absent, each smoke script uses its own temporary directory and removes it afterward. Pointing the override at an existing database intentionally inserts synthetic records there, so keep it separate from the live demo path.
 
-The legacy `database/init_db.py` and `database/test_storage.py` use a hardcoded sibling `analysis.db` and write on execution. For a legacy smoke check, copy those two scripts, `database/schema.sql`, the saved V1 artifact and `ml/reports/evaluation.json` into a temporary directory with the same relative paths. Run the copied scripts there in initialization order. Avoid collecting `database/test_storage.py` with pytest on the working repository.
+`database.init_db`, `database.test_storage` and `database.check_storage` are import-safe: importing them neither opens a database nor loads the model. Running `python -m database.init_db` explicitly initializes the configured path.
 
-## Storage Functions
+## Model metadata and evidence limits
 
-storage.py provides:
-- save_analysis(): saves an email and successful model prediction together.
-- get_analysis(): retrieves an analysis with its email and model details.
+`register_model(model_path, report_path)` hashes the saved artifact and reuses its existing registration ID. The stored evaluation JSON is supplied metadata; the historical report does not include an artifact hash or dataset checksum that independently binds its metrics to the model file. Registration checks identity consistency but does not rerun training or evaluate accuracy.
 
-Foreign keys are enabled on each connection.
-Failed inserts roll back the transaction.
-
-This database is currently separate from PhishGuard/phishguard.db.
-Feedback functions:
-- submit_feedback(): records a suggested label as pending.
-- review_feedback(): approves or rejects pending feedback.
-- get_feedback(): retrieves a feedback record.
-
-The backend must supply authenticated identities and enforce reviewer
-permissions. Approved feedback does not automatically retrain the model.
-
-## Model registration and prediction storage
-
-- register_model(model_path, report_path) registers a model using its SHA-256 hash. Registering the same model again reuses its existing ID.
-- save_model_response(sender, subject, body, result) matches the response's model_version and artifact_hash to a registered model before saving.
-- Verified that a live API prediction can be saved and retrieved with matching model metadata.
-- Verified that an incorrect artifact hash is rejected without adding email or analysis records.
-
-The backend analysis endpoint preserves `model_version` and `artifact_hash` when validating the AI response and calls `save_model_response()` for a successful prediction.
+Current regression checks cover list/detail consistency, null scores, restore attribution, feedback behavior, rollback, registration, schema reuse, deletion and import safety. They use synthetic data and do not measure real-mail detection quality.

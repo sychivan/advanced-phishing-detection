@@ -1,0 +1,29 @@
+Command: /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node --test backend/test_gmail_dashboard.cjs
+✔ stored-message Overview describes score bands and their denominator (16.166973ms)
+✔ Quarantine fetches detail and separates a moderate score from a Phishing prediction (2.834625ms)
+✔ renders a safe, expandable score explanation for each scanned message (1.860086ms)
+✔ keeps an explanation affordance for an unavailable result or an empty reason list (1.243149ms)
+✔ Gmail sign-out clears results and returns to sign-in even if demo login is still active (1.575012ms)
+✔ a 401 on scan returns to sign-in and asks the user to reconnect (0.882292ms)
+✔ a new Gmail connection for the same address never inherits old scan results (0.72618ms)
+✔ a scan that finishes while signing out cannot render mailbox results (0.735043ms)
+✔ a delayed local message detail cannot reopen the drawer on the sign-in page (2.753986ms)
+✔ an old Overview response cannot change the current quarantine badge (1.130071ms)
+✔ leaving a local message removes its body from the closed drawer (1.228878ms)
+✔ mock quarantine and restore preserve the existing scores (1.32498ms)
+✔ unscored stored messages have a separate Overview category and daily segment (0.925235ms)
+✔ No score filtering keeps missing analysis separate from a genuine zero and sorts it last (2.596181ms)
+✔ partial bulk restore removes successful rows and keeps failed rows available to retry (1.871423ms)
+✔ partial bulk delete removes successful rows and keeps failed rows available to retry (1.385891ms)
+✔ a stale local 401 cannot clear a newer demo session (1.346242ms)
+✔ a delayed local sign-out cannot clear a session established after it started (1.144753ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.13001
+
+Exit code: 0

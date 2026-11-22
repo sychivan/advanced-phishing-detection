@@ -2,6 +2,8 @@
 
 **Victoria University · NIT3004 Capstone Project 2 · Latest recorded rehearsal: 22 November 2026 (Sydney)**
 
+> **Reading this record:** the sections below preserve earlier Windows rehearsals and their original evidence. For the current checkout, use the [root README](../README.md) and `scripts/verify_project.py`. The E11 totals include experimental suites that were never committed; current counts are recorded separately. PR #6 has since been merged into `main` (merge commit `929790ec4b22c6dafc1e7ac39026fad0ad75efa0`).
+
 ## Individual backend contribution
 
 I secured the Flask routes that read or change stored email and preserved the dashboard's message and statistics formats. I connected V1 predictions to SQLite storage using the model version and artifact hash. I hardened the read-only Gmail flow around Google consent, sessions, message retrieval and local V1 scoring. The automated tests cover these integration boundaries using synthetic input.

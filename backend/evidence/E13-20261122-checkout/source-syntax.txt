@@ -1,0 +1,2 @@
+AST parsing: 28 Python source files passed. No modules executed.
+Node vm.Script parsing: one inline script each in phishguard-frontend.html and archive/PhishGuard_UI_Prototype.html passed.

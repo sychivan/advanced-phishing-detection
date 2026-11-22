@@ -33,3 +33,9 @@ token.json
 
 # Temporary files
 *.log
+
+# Downloaded training data is kept outside version control.
+ml/data/**/*.csv
+
+# Local verification output; retain only reviewed, nonprivate evidence separately.
+verification-results/

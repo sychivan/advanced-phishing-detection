@@ -1,0 +1,4 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python -m backend.setup_db
+Backend database is ready with V1 registered.
+
+Exit code: 0
