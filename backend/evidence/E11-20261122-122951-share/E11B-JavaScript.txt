@@ -1,0 +1,27 @@
+E11B | JavaScript / Node.js
+Source: current local run from the copied dashboard suite
+Start: 2026-11-22T12:30:00.184710+11:00 Australia/Sydney
+End: 2026-11-22T12:30:00.376207+11:00 Australia/Sydney
+Isolation: copied frontend, mocked fetch and synthetic fixtures; no inherited credentials.
+
+node --test backend/test_gmail_dashboard.cjs
+
+✔ stored-message Overview describes score bands and their denominator (25.6233ms)
+✔ Quarantine fetches detail and separates a moderate score from a Phishing prediction (3.2653ms)
+✔ renders a safe, expandable score explanation for each scanned message (2.0336ms)
+✔ keeps an explanation affordance for an unavailable result or an empty reason list (1.0136ms)
+✔ Gmail sign-out clears results and returns to sign-in even if demo login is still active (1.8859ms)
+✔ a 401 on scan returns to sign-in and asks the user to reconnect (0.9953ms)
+✔ a new Gmail connection for the same address never inherits old scan results (0.9881ms)
+✔ a scan that finishes while signing out cannot render mailbox results (0.9668ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 124.3926
+
+Tests: 8 | Passed: 8 | Failed: 0 | Skipped: 0
+Exit code: 0

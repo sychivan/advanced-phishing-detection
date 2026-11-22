@@ -240,8 +240,8 @@ dialog .actions{display:flex;justify-content:flex-end;gap:10px}
      GET    /messages?status=inbox      -> Message[]        (delivered mail)
      GET    /messages?status=quarantine -> Message[]        (flagged mail)
      GET    /messages/:id               -> Message
-     POST   /messages/:id/quarantine    -> Message          (user reports as phishing)
-     POST   /messages/:id/restore       -> Message          (user marks as safe)
+     POST   /messages/:id/quarantine    -> Message          (moves to quarantine)
+     POST   /messages/:id/restore       -> Message          (returns to inbox)
      DELETE /messages/:id               -> {ok:true}        (permanent delete)
 
    Message = {
@@ -259,13 +259,13 @@ dialog .actions{display:flex;justify-content:flex-end;gap:10px}
    Stats = { total, phishing, suspicious, safe, quarantined,
              daily: [{date: "YYYY-MM-DD", safe: n, phishing: n}] }   // last 7 days
 
-   Verdict thresholds are client-side display only: see CONFIG.THRESHOLDS.
+   Stored-message score bands match the backend dashboard counts. V1's binary prediction uses its own cutoff.
    ============================================================================= */
 
 
 const CONFIG = {
     USE_MOCK: false,
-    BASE_URL: 'http://127.0.0.1:5000/api',
+    BASE_URL: location.pathname === '/gmail/app' ? location.origin + '/api' : 'http://127.0.0.1:5000/api',
     THRESHOLDS: {
         suspicious: 40,
         phishing: 70
@@ -277,11 +277,11 @@ const CONFIG = {
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const verdictOf = (score) => score >= CONFIG.THRESHOLDS.phishing ? 'phishing' : score >= CONFIG.THRESHOLDS.suspicious ? 'suspicious' : 'safe';
-const verdictLabel = { safe: 'Safe', suspicious: 'Suspicious', phishing: 'Phishing' };
+const verdictLabel = { safe: 'Low score', suspicious: 'Moderate score', phishing: 'High score' };
 const verdictDesc = {
-  safe: 'No significant phishing indicators found.',
-  suspicious: 'Some risky signals. Treat links and attachments with caution.',
-  phishing: 'High likelihood of phishing. Review this email carefully and consider quarantining it.'
+  safe: 'Below 40. Use ordinary caution with links and attachments.',
+  suspicious: '40 to below 70. Review unfamiliar messages.',
+  phishing: '70 or above. Review this message before acting.'
 };
 const initials = (n) => (n || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 function fmtDate(iso, long) {
@@ -406,12 +406,19 @@ const HttpAdapter = {
   async _req(method, path, body) {
     const s = Session.get();
     const res = await fetch(CONFIG.BASE_URL + path, {
-      method, credentials: 'include',
+      method,
       headers: { 'Content-Type': 'application/json', ...(s && s.token ? { Authorization: 'Bearer ' + s.token } : {}) },
       body: body ? JSON.stringify(body) : undefined
     });
     if (res.status === 401 && path !== '/auth/login') { Session.clear(); location.hash = '#/login'; throw new Error('Session expired. Please sign in again.'); }
-    if (!res.ok) { let msg = 'Request failed (' + res.status + ')'; try { msg = (await res.json()).message || msg; } catch (e) {} throw new Error(msg); }
+    if (!res.ok) {
+      let message = 'Request failed (' + res.status + ')';
+      try {
+        const error = await res.json();
+        message = error.message || error.error || message;
+      } catch (e) {}
+      throw new Error(message);
+    }
     return res.status === 204 ? {} : res.json();
   },
   login: (email, password) => HttpAdapter._req('POST', '/auth/login', { email, password }),
@@ -453,7 +460,7 @@ function shell(active, user, gmailMode = false) {
       <div class="spacer"></div>
       <div class="user-box" ${user.email ? '' : 'hidden'}>
         <div class="who">Signed in as<br><strong>${esc(user.email)}</strong></div>
-        <button class="btn sm" id="logout">Sign out</button>
+        <button class="btn sm" id="logout">${gmailMode ? 'Disconnect Gmail' : 'Sign out'}</button>
       </div>
     </aside>
     <main class="main" id="main" tabindex="-1"></main>
@@ -471,8 +478,9 @@ function setQCount(n) {
   el.textContent = n || ''; el.className = n ? 'count' : '';
 }
 const scoreCell = (m) => {
+  if (!Number.isFinite(m.score)) return '<div class="score"><span class="pill">No score</span></div>';
   const v = verdictOf(m.score);
-  return `<div class="score"><span class="pill ${v}">${verdictLabel[v]} &middot; ${Math.round(m.score)}</span><div class="meter" role="img" aria-label="Phishing score ${Math.round(m.score)} out of 100"><span class="${v}" style="width:${Math.max(3, m.score)}%"></span></div></div>`;
+  return `<div class="score"><span class="pill ${v}">${verdictLabel[v]} &middot; ${m.score}</span><div class="meter" role="img" aria-label="Phishing score ${m.score} out of 100"><span class="${v}" style="width:${Math.max(3, m.score)}%"></span></div></div>`;
 };
 const errorBox = (msg) => `<div class="card empty"><h3>Something went wrong</h3><p>${esc(msg)}</p><button class="btn" onclick="route()">Try again</button></div>`;
 
@@ -490,7 +498,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#drawer
 /* actions: array of {label, cls, handler(m)} */
 function openDrawer(m, actions) {
   drawerReturnFocus = document.activeElement;
-  const v = verdictOf(m.score), d = $('#drawer');
+  const scored = Number.isFinite(m.score);
+  const v = scored ? verdictOf(m.score) : '', d = $('#drawer');
   d.innerHTML = `
     <div class="drawer-head">
       <div><div class="note">Message</div><h2 id="drawer-title">${esc(m.subject)}</h2></div>
@@ -498,13 +507,15 @@ function openDrawer(m, actions) {
     </div>
     <div class="drawer-body">
       <div class="big-score ${v}">
-        <div class="num">${Math.round(m.score)}</div>
-        <div><div class="t">${verdictLabel[v]}</div><div class="d">${verdictDesc[v]}</div></div>
+        <div class="num">${scored ? m.score : '–'}</div>
+        <div><div class="t">${scored ? verdictLabel[v] : 'No score'}</div>
+          ${scored ? `<div class="d">${verdictDesc[v]}</div>` : ''}</div>
       </div>
       <dl class="meta">
         <dt>From</dt><dd>${esc(m.from.name)} &lt;${esc(m.from.email)}&gt;</dd>
         <dt>Received</dt><dd>${esc(fmtDate(m.receivedAt, true))}</dd>
         <dt>Location</dt><dd>${m.status === 'quarantine' ? 'Quarantine' : 'Inbox'}</dd>
+        ${m.classification ? `<dt>Model prediction</dt><dd>${esc(m.classification)}</dd>` : ''}
       </dl>
       <h3 class="h3">Why this score</h3>
      
@@ -598,22 +609,22 @@ async function renderOverview() {
     const maxDay = Math.max(1, ...s.daily.map(d => d.safe + d.phishing));
     const recent = q.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt)).slice(0, 4);
     main.innerHTML = `
-      <div class="page-head"><div><h1>Overview</h1><p>Summary of all email scanned by PhishGuard.</p></div>
+      <div class="page-head"><div><h1>Overview</h1><p>Stored inbox and quarantine messages grouped by score. V1 reports its prediction separately, with a cutoff of 50.</p></div>
         <button class="btn" id="refresh">Refresh</button></div>
       <div class="stat-grid">
-        <div class="card stat"><div class="label"><span class="dot primary"></span>Emails scanned</div><div class="value">${s.total}</div><div class="hint">All time</div></div>
-        <div class="card stat"><div class="label"><span class="dot danger"></span>Phishing detected</div><div class="value">${s.phishing}</div><div class="hint">${pct(s.phishing)}% of all email</div></div>
-        <div class="card stat"><div class="label"><span class="dot safe"></span>Safe emails</div><div class="value">${s.safe}</div><div class="hint">${pct(s.safe)}% of all email</div></div>
-        <div class="card stat"><div class="label"><span class="dot warn"></span>Suspicious</div><div class="value">${s.suspicious}</div><div class="hint">Delivered with a warning</div></div>
+        <div class="card stat"><div class="label"><span class="dot primary"></span>Stored messages</div><div class="value">${s.total}</div><div class="hint">Inbox and quarantine</div></div>
+        <div class="card stat"><div class="label"><span class="dot danger"></span>High score</div><div class="value">${s.phishing}</div><div class="hint">70 or above · ${pct(s.phishing)}% of stored messages</div></div>
+        <div class="card stat"><div class="label"><span class="dot safe"></span>Low score</div><div class="value">${s.safe}</div><div class="hint">Below 40 · ${pct(s.safe)}% of stored messages</div></div>
+        <div class="card stat"><div class="label"><span class="dot warn"></span>Moderate score</div><div class="value">${s.suspicious}</div><div class="hint">40 to below 70 · ${pct(s.suspicious)}% of stored messages</div></div>
       </div>
       <div class="grid-2">
-        <section class="card card-pad"><h2>Phishing vs safe</h2>
+        <section class="card card-pad"><h2>Score bands</h2>
           <div class="donut-wrap">${donut([
             { value: s.safe, color: 'var(--safe)' }, { value: s.suspicious, color: 'var(--warn)' }, { value: s.phishing, color: 'var(--danger)' }], s.total)}
             <div class="legend">
-              <div><span class="dot safe"></span>Safe<b>${s.safe}</b></div>
-              <div><span class="dot warn"></span>Suspicious<b>${s.suspicious}</b></div>
-              <div><span class="dot danger"></span>Phishing<b>${s.phishing}</b></div>
+              <div><span class="dot safe"></span>Low<b>${s.safe}</b></div>
+              <div><span class="dot warn"></span>Moderate<b>${s.suspicious}</b></div>
+              <div><span class="dot danger"></span>High<b>${s.phishing}</b></div>
             </div></div></section>
         <section class="card card-pad"><h2>Last 7 days</h2>
           <div class="bars" role="img" aria-label="Daily email counts for the last 7 days">
@@ -621,12 +632,12 @@ async function renderOverview() {
               const tot = d.safe + d.phishing, h = tot / maxDay * 100;
               const day = new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' });
               return `<div class="bar-col"><span class="n">${tot}</span>
-                <div class="bar-stack" style="height:${Math.max(h, 4)}%" title="${d.safe} safe, ${d.phishing} phishing">
+                <div class="bar-stack" style="height:${Math.max(h, 4)}%" title="${d.safe} below 70, ${d.phishing} at 70 or above">
                   <div class="seg-bad" style="flex:${d.phishing}"></div><div class="seg-safe" style="flex:${d.safe}"></div></div>
                 <small>${day}</small></div>`;
             }).join('')}
           </div>
-          <div class="legend" style="flex-direction:row;gap:18px;margin-top:12px;font-size:13px"><div><span class="dot safe"></span>Safe</div><div><span class="dot danger"></span>Phishing</div></div>
+          <div class="legend" style="flex-direction:row;gap:18px;margin-top:12px;font-size:13px"><div><span class="dot safe"></span>Below 70</div><div><span class="dot danger"></span>70 or above</div></div>
         </section>
       </div>
       <section class="card card-pad"><div class="row-between" style="margin-bottom:6px"><h2 style="margin:0">Recently quarantined</h2><a href="#/quarantine" class="btn sm">View all</a></div>
@@ -685,7 +696,7 @@ const showMail = async (m) => {
         handler: async (x) => {
           if (!await confirmDialog(
             'Move to quarantine?',
-            'This email will be moved to quarantine and reported as phishing.',
+            'This email will move to quarantine. Its V1 prediction will stay the same.',
             'Quarantine'
           )) return;
 
@@ -709,12 +720,12 @@ const showMail = async (m) => {
 };
 
     main.innerHTML = `
-      <div class="page-head"><div><h1>My Mail</h1><p>Delivered email with its phishing score (0 = safe, 100 = certain phishing).</p></div></div>
+      <div class="page-head"><div><h1>My Mail</h1><p>Inbox messages and their scores from 0 to 100. Open a message for the model prediction and reasons.</p></div></div>
       ${qList.length ? `<div class="banner" role="status"><span aria-hidden="true">&#9888;</span><span>${qList.length} flagged email${qList.length === 1 ? ' was' : 's were'} kept out of your inbox. <a href="#/quarantine" style="color:inherit;font-weight:700">Review quarantine</a></span></div>` : ''}
       <div class="toolbar">
         <div class="search"><label class="sr-only" for="search">Search mail</label><input class="input" id="search" type="search" placeholder="Search sender, subject or text" value="${esc(mailState.q)}"></div>
-        <div class="chips" role="group" aria-label="Filter by verdict">
-          ${[['all', 'All'], ['safe', 'Safe'], ['suspicious', 'Suspicious']].map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${mailState.filter === k}">${l}</button>`).join('')}
+        <div class="chips" role="group" aria-label="Filter by score band">
+          ${[['all', 'All'], ['safe', 'Low'], ['suspicious', 'Moderate'], ['phishing', 'High']].map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${mailState.filter === k}">${l}</button>`).join('')}
         </div>
         <label class="sr-only" for="sort">Sort</label>
         <select class="select" id="sort"><option value="new" ${mailState.sort === 'new' ? 'selected' : ''}>Newest first</option><option value="score" ${mailState.sort === 'score' ? 'selected' : ''}>Highest score first</option></select>
@@ -741,7 +752,7 @@ async function renderQuarantine(params) {
     const selected = new Set();
 
     const restoreOne = async (m) => {
-      if (!await confirmDialog('Restore this email?', 'It will be marked as safe and moved back to your inbox.', 'Restore')) return;
+      if (!await confirmDialog('Restore this email?', 'This email will return to your inbox with its existing V1 prediction.', 'Restore')) return;
       try { await API.restore(m.id); remove([m.id]); toast('Restored to inbox'); } catch (e) { toast(e.message); }
     };
     const deleteMany = async (ids) => {
@@ -749,14 +760,21 @@ async function renderQuarantine(params) {
       try { await Promise.all(ids.map(id => API.remove(id))); remove(ids); toast('Deleted'); } catch (e) { toast(e.message); }
     };
     const remove = (ids) => { msgs = msgs.filter(m => !ids.includes(m.id)); ids.forEach(i => selected.delete(i)); setQCount(msgs.length); closeDrawer(); draw(); };
-    const show = (m) => openDrawer(m, [
-      { label: 'Not phishing - restore', cls: 'safe', handler: restoreOne },
-      { label: 'Delete permanently', cls: 'danger', handler: (x) => deleteMany([x.id]) }
-    ]);
+    const show = async (m) => {
+      try {
+        const detail = await API.getMessage(m.id);
+        openDrawer(detail, [
+          { label: 'Restore to inbox', cls: 'safe', handler: restoreOne },
+          { label: 'Delete permanently', cls: 'danger', handler: (x) => deleteMany([x.id]) }
+        ]);
+      } catch (e) {
+        toast('Unable to load email: ' + e.message);
+      }
+    };
 
     function draw() {
       const all = msgs.length && selected.size === msgs.length;
-      $('#q-body').innerHTML = !msgs.length ? '<div class="empty"><h3>Quarantine is empty</h3>Emails flagged as phishing will appear here.</div>' : `
+      $('#q-body').innerHTML = !msgs.length ? '<div class="empty"><h3>Quarantine is empty</h3>Messages moved to quarantine will appear here.</div>' : `
         <div class="bulkbar">
           <label><input type="checkbox" id="sel-all" ${all ? 'checked' : ''}> <span>${selected.size ? selected.size + ' selected' : 'Select all'}</span></label>
           <span class="sp"></span>
@@ -773,7 +791,7 @@ async function renderQuarantine(params) {
       $('#sel-all').onchange = (e) => { selected.clear(); if (e.target.checked) msgs.forEach(m => selected.add(m.id)); draw(); };
       $('#bulk-restore').onclick = async () => {
         const ids = [...selected];
-        if (!await confirmDialog('Restore ' + ids.length + ' email(s)?', 'They will be marked as safe and moved back to your inbox.', 'Restore')) return;
+        if (!await confirmDialog('Restore ' + ids.length + ' email(s)?', 'These emails will return to your inbox with their existing V1 predictions.', 'Restore')) return;
         try { await Promise.all(ids.map(id => API.restore(id))); remove(ids); toast('Restored to inbox'); } catch (e) { toast(e.message); }
       };
       $('#bulk-delete').onclick = () => deleteMany([...selected]);
@@ -786,12 +804,12 @@ async function renderQuarantine(params) {
     }
 
     main.innerHTML = `
-      <div class="page-head"><div><h1>Quarantine</h1><p>Emails flagged as phishing are held here instead of your inbox.</p></div></div>
+      <div class="page-head"><div><h1>Quarantine</h1><p>Messages moved out of the inbox for review.</p></div></div>
       <div class="card" id="q-body"></div>
-      <p class="note" style="margin-top:12px">Quarantined emails cannot be opened as live content. Restoring an email tells PhishGuard it was a false positive.</p>`;
+      <p class="note" style="margin-top:12px">Message content is shown as plain text. Restoring a V1 phishing result can create pending feedback.</p>`;
     draw();
     const openId = params && params.get('open');
-    if (openId) { const m = msgs.find(x => x.id === openId); if (m) show(m); }
+    if (openId) { const m = msgs.find(x => x.id === openId); if (m) await show(m); }
   } catch (e) { main.innerHTML = errorBox(e.message); }
 }
 
@@ -805,31 +823,48 @@ async function gmailRequest(path, csrf) {
     body: new URLSearchParams({ csrf }),
   } : {});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Gmail request failed.');
+  if (!response.ok) {
+    const error = new Error(data.error || 'Gmail request failed.');
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
 let gmailScan = null;
 
+function endGmailSession() {
+  gmailScan = null;
+  quarantineCount = null;
+  location.hash = '#/login';
+}
+
 function renderGmailDashboard(name, connection) {
-  const messages = gmailScan?.email === connection.email ? gmailScan.messages : [];
+  if (gmailScan?.csrf !== connection.csrf) gmailScan = null;
+  const messages = gmailScan?.messages ?? [];
   const count = label => messages.filter(message => message.classification === label).length;
   const flagged = messages.filter(message => ['Suspicious', 'Phishing'].includes(message.classification));
   quarantineCount = flagged.length;
   $('#app').innerHTML = shell(name, { email: connection.email }, true);
   const main = $('#main');
-  const rows = entries => entries.length ? `<ul class="list">${entries.map(message => `
+  const rows = entries => entries.length ? `<ul class="list">${entries.map(message => {
+    const scored = Number.isFinite(message.risk_score);
+    const reasons = message.reasons?.length ? message.reasons : ['V1 did not provide an explanation for this result.'];
+    const color = scored ? { Phishing: 'phishing', Suspicious: 'suspicious', Safe: 'safe' }[message.classification] : '';
+    return `
     <li class="item nocheck">
       <div class="avatar" aria-hidden="true">${esc(initials(message.sender))}</div>
       <div class="body-col">
         <div class="subject">${esc(message.subject)}</div>
         <div class="from">${esc(message.sender)}</div>
-        ${message.reasons.length ? `<details><summary>Why this score?</summary><ul>${
-          message.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>` : ''}
+        <details><summary>${scored ? 'Why this score?' : 'Why no score?'}</summary>
+          <ul>${reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details>
       </div>
-      <div class="score"><span class="pill ${verdictOf(message.risk_score)}">${esc(message.classification)}${
-        Number.isFinite(message.risk_score) ? ' · ' + Math.round(message.risk_score) : ''}</span></div>
-    </li>`).join('')}</ul>` : '<div class="empty">No messages to show.</div>';
+      <div class="score"><span class="pill ${color || ''}">${scored
+        ? 'Prediction: ' + esc(message.classification) + ' · ' + message.risk_score + '/100'
+        : esc(message.classification) + ' · No score'}</span></div>
+    </li>`;
+  }).join('')}</ul>` : '<div class="empty">No messages to show.</div>';
 
   const title = { overview: 'Overview', mail: 'My Mail', quarantine: 'Flagged' }[name];
   const description = {
@@ -839,14 +874,17 @@ function renderGmailDashboard(name, connection) {
   }[name];
   const stats = [
     ['Emails scanned', messages.length, 'primary'],
-    ['Phishing detected', count('Phishing'), 'danger'],
-    ['Safe emails', count('Safe'), 'safe'],
-    ['Suspicious', count('Suspicious'), 'warn']
+    ['Predicted phishing', count('Phishing'), 'danger'],
+    ['Predicted safe', count('Safe'), 'safe'],
+    ['Predicted suspicious', count('Suspicious'), 'warn']
   ];
   document.title = title + ' - PhishGuard';
   main.innerHTML = `
     <div class="page-head"><div><h1>${title}</h1><p>${description}</p></div>
       <button class="btn primary" id="gmail-scan">Scan up to 5 messages</button></div>
+    <div class="banner"><div><strong>V1 predictions can be wrong.</strong> Legitimate messages can be flagged, and harmful messages can be missed.
+      Verify suspected phishing independently before acting. Scanning is read-only and leaves your Gmail messages in place.</div></div>
+    <p class="note">Disconnect ends this PhishGuard session. You can remove the Google grant separately in your Google Account.</p>
     <p id="gmail-status" role="status"></p>
     ${name === 'overview' ? `
       <div class="stat-grid">${stats.map(([label, value, color]) => `
@@ -857,30 +895,34 @@ function renderGmailDashboard(name, connection) {
     : `<div class="card">${rows(name === 'mail' ? messages : flagged)}</div>`}`;
   const status = $('#gmail-status');
   const button = $('#gmail-scan');
+  const logout = $('#logout');
   button.onclick = async () => {
     button.disabled = true;
     status.textContent = 'Scanning your Gmail inbox…';
     try {
       const { messages } = await gmailRequest('/gmail/scan', connection.csrf);
-      if (!main.isConnected) return;
-      gmailScan = { email: connection.email, messages };
+      if (!main.isConnected || logout.disabled) return;
+      gmailScan = { csrf: connection.csrf, messages };
       renderGmailDashboard(name, connection);
     } catch (error) {
-      status.textContent = error.message;
+      if (!main.isConnected || logout.disabled) return;
+      if (error.status === 401) endGmailSession();
+      else status.textContent = error.message;
     } finally {
-      button.disabled = false;
+      if (!logout.disabled) button.disabled = false;
     }
   };
-  $('#logout').onclick = async (event) => {
-    const logout = event.currentTarget;
+  logout.onclick = async () => {
     logout.disabled = true;
     button.disabled = true;
     try {
       await gmailRequest('/gmail/disconnect', connection.csrf);
-      gmailScan = null;
-      quarantineCount = null;
-      location.hash = '#/login';
+      endGmailSession();
     } catch (error) {
+      if (error.status === 401) {
+        endGmailSession();
+        return;
+      }
       status.textContent = error.message;
       logout.disabled = false;
       button.disabled = false;
@@ -889,7 +931,7 @@ function renderGmailDashboard(name, connection) {
 }
 
 function renderGmail() {
-  location.assign(new URL('/gmail/app#/overview', CONFIG.BASE_URL).href);
+  location.assign(new URL('/gmail/connect?view=dashboard', CONFIG.BASE_URL).href);
 }
 
 const ROUTES = { login: renderLogin, overview: renderOverview, mail: renderMail, quarantine: renderQuarantine, gmail: renderGmail };
@@ -915,7 +957,6 @@ async function route() {
         return;
       }
       gmailScan = null;
-      if (name === 'gmail') name = authed ? 'overview' : 'login';
     } catch (error) {
       if (version === routeVersion) $('#app').innerHTML = errorBox(error.message);
       return;
@@ -923,7 +964,7 @@ async function route() {
   }
   if (!name) name = authed ? 'overview' : 'login';
   if (!authed && name !== 'login' && name !== 'gmail') name = 'login';
-  if (authed && name === 'login') name = 'overview';
+  if (authed && name === 'login' && location.pathname !== '/gmail/app') name = 'overview';
   const target = '#/' + name;
   if (!location.hash.startsWith(target)) { history.replaceState(null, '', target + (query && name === path ? '?' + query : '')); }
   document.title = TITLES[name] + ' - PhishGuard';

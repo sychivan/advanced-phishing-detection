@@ -54,16 +54,17 @@ Backend integration is pending.
 
 ## Setup and Testing
 
-Run from the repository root:
+From the repository root, select `$DemoPython` using the [main README](../README.md#select-the-interpreter-in-each-demo-terminal). Run the storage check against a new disposable path.
 
 ```powershell
-.\.venv\Scripts\python.exe database/init_db.py
-.\.venv\Scripts\python.exe database/test_storage.py
-.\.venv\Scripts\python.exe -m database.check_storage
+$env:PHISHGUARD_DB_PATH = Join-Path $env:TEMP ("phishguard-sqlite-test-{0}.sqlite3" -f [guid]::NewGuid())
+& $DemoPython -m backend.setup_db
+& $DemoPython -m database.check_storage
 ```
 
-The demonstration scripts add sample email and analysis records.
-The local database is database/analysis.db and is excluded from Git.
+The check inserts a synthetic message, verifies it and confirms rollback for an invalid model reference. The default local database is `database/analysis.db` and is excluded from Git.
+
+The legacy `database/init_db.py` and `database/test_storage.py` use a hardcoded sibling `analysis.db` and write on execution. For a legacy smoke check, copy those two scripts, `database/schema.sql`, the saved V1 artifact and `ml/reports/evaluation.json` into a temporary directory with the same relative paths. Run the copied scripts there in initialization order. Avoid collecting `database/test_storage.py` with pytest on the working repository.
 
 ## Storage Functions
 
@@ -90,5 +91,4 @@ permissions. Approved feedback does not automatically retrain the model.
 - Verified that a live API prediction can be saved and retrieved with matching model metadata.
 - Verified that an incorrect artifact hash is rejected without adding email or analysis records.
 
-Automatic saving through the backend endpoint is still pending integration.
-The backend must preserve model_version and artifact_hash when validating the AI response, then call save_model_response().
+The backend analysis endpoint preserves `model_version` and `artifact_hash` when validating the AI response and calls `save_model_response()` for a successful prediction.

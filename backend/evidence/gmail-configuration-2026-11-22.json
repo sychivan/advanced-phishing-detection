@@ -1,0 +1,44 @@
+{
+  "date_sydney": "2026-11-22",
+  "flask_pid_before": 36148,
+  "flask_pid_after": 27168,
+  "v1_pid_unchanged": 37280,
+  "running_gmail_configuration_before": {
+    "GOOGLE_CLIENT_ID": false,
+    "GOOGLE_CLIENT_SECRET": false,
+    "GOOGLE_REDIRECT_URI": false,
+    "PHISHGUARD_SESSION_SECRET": true
+  },
+  "running_gmail_configuration_after": {
+    "GOOGLE_CLIENT_ID": true,
+    "GOOGLE_CLIENT_SECRET": true,
+    "GOOGLE_REDIRECT_URI": true,
+    "PHISHGUARD_SESSION_SECRET": true
+  },
+  "exact_local_callback_in_google_export_and_redirect": true,
+  "consent_connect_http_before": 503,
+  "consent_connect_http_after": 302,
+  "google_redirect_verified_not_followed": true,
+  "pkce_s256_state_and_read_only_scope_verified": true,
+  "backend_v1_and_dashboard_health": true,
+  "unconnected_gmail_scan_http": 401,
+  "existing_demo_login_and_logout_verified": true,
+  "existing_database_counts_before_and_after": {
+    "emails": 5,
+    "analysis_results": 5
+  },
+  "synthetic_rehearsal": {
+    "disposable_database": true,
+    "risk_score": 85.92,
+    "reason_count": 2,
+    "quarantine_restore_logout_passed": true
+  },
+  "tests": {
+    "python_passed": 44,
+    "python_subtests_passed": 12,
+    "dashboard_javascript_passed": 6
+  },
+  "v1_sha256": "633f1c0893b5f63c02097b6482485a7bcf221383759f31f65406ace70b8d5cae",
+  "live_google_consent_or_inbox_verified": false,
+  "browser_automation_available": false
+}

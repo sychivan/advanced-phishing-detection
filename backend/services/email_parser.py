@@ -9,10 +9,14 @@ def extract_email_features(sender, subject, body):
         body
     )
 
-    domains = [
-        urlparse(url).hostname
-        for url in urls
-    ]
+    domains = []
+    for url in urls:
+        try:
+            hostname = urlparse(url).hostname
+        except ValueError:
+            continue
+        if hostname:
+            domains.append(hostname)
 
     return {
         "sender": sender,

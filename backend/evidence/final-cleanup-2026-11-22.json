@@ -1,0 +1,63 @@
+{
+  "date_sydney": "2026-11-22",
+  "python": "3.15.2",
+  "normal_launch_used_saved_config": true,
+  "flask_pid": 36828,
+  "v1_pid": 38612,
+  "v1_sha256": "633f1c0893b5f63c02097b6482485a7bcf221383759f31f65406ace70b8d5cae",
+  "v1_cutoff": 50,
+  "demo_database": ".venv/phishguard-capstone-final-20261122.sqlite3",
+  "original_database_counts_unchanged": {
+    "emails": 5,
+    "analysis_results": 5,
+    "feedback": 4
+  },
+  "demo_database_counts": {
+    "emails": 2,
+    "analysis_results": 2,
+    "feedback": 2
+  },
+  "synthetic_predictions": [
+    {
+      "classification": "Phishing",
+      "score": 85.92,
+      "reason_count": 2
+    },
+    {
+      "classification": "Safe",
+      "score": 40.24,
+      "reason_count": 2
+    }
+  ],
+  "http_workflows": [
+    "health and dashboard",
+    "valid and invalid login",
+    "CORS",
+    "V1 analysis and metadata",
+    "SQLite storage and message detail",
+    "Overview and My Mail APIs",
+    "quarantine and restore",
+    "submit and approve feedback",
+    "synthetic deletion",
+    "logout and revoked bearer"
+  ],
+  "verification_note": "Initial harness assumed the Safe fixture would be Low. V1 actually returned Safe with score 40.24. Rehearsal verified the Moderate band without changing the prediction.",
+  "dashboard_adapter_real_loopback": "passed in JavaScript VM; no browser UI",
+  "browser_automation": "unavailable; native Computer Use pipe could not connect",
+  "gmail": {
+    "connect_http": 302,
+    "verified_google_redirect_without_following": true,
+    "exact_callback": true,
+    "pkce_s256_and_readonly_scope": true,
+    "unconnected_scan_http": 401,
+    "live_consent_callback_retrieval_disconnect_reconnect": false
+  },
+  "tests": {
+    "pytest_passed": 74,
+    "subtests_passed": 12,
+    "dashboard_js_passed": 8,
+    "failed": 0,
+    "reported_skipped": 0,
+    "standalone_sqlite_checks_passed": 2
+  }
+}

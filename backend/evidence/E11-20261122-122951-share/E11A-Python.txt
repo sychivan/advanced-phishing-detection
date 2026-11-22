@@ -1,0 +1,16 @@
+E11A | Python / pytest
+Source: current local run from an isolated copy of workspace tests
+Start: 2026-11-22T12:29:51.864518+11:00 Australia/Sydney
+End: 2026-11-22T12:30:00.183445+11:00 Australia/Sydney
+Interpreter: [workspace]/.venv/demo-runtime/python.exe (Python 3.15.2)
+Isolation: disposable DB, no local config or inherited credentials, Google mocked, Python network blocked.
+
+& $DemoPython -m pytest backend ml/experiments/training_data_v1 ml/experiments/overnight_20261122_001958/test_runner.py ml/test_experimental_scoring.py -q --tb=short -p no:cacheprovider
+
+............................................................ [ 81%]
+..............                                                           [100%]
+74 passed, 12 subtests passed in 6.44s
+
+Tests accounted for: 74 | Passed: 74 | Failed: 0 | Skipped: 0 | Errors: 0
+Subtests passed: 12 | Subtests failed: 0
+Exit code: 0

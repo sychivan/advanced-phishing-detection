@@ -2,9 +2,10 @@ from contextlib import closing
 from pathlib import Path
 import json
 import math
+import os
 import sqlite3
 
-DB_PATH = Path(__file__).resolve().parent / "analysis.db"
+DB_PATH = Path(os.environ.get("PHISHGUARD_DB_PATH") or Path(__file__).resolve().parent / "analysis.db")
 
 
 def connect():

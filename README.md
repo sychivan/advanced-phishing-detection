@@ -1,243 +1,105 @@
-# PhishGuard – Advanced Phishing Detection System
+# PhishGuard
 
-**Capstone 3004 | Victoria University**
+PhishGuard analyses submitted email text with the saved AI V1 model. The dashboard shows the risk score and reasons, and lets users review, quarantine or restore local records. The optional Gmail scan reads and analyses up to five messages without changing the mailbox.
 
-## 1. Project Overview
+## Components
 
-PhishGuard is a web-based phishing email detection and quarantine system developed as a university capstone project.
+- `backend/app.py` runs the Flask API and serves `phishguard-frontend.html`.
+- `ml/model_api.py` serves V1 predictions from the existing model artifact.
+- `database/` contains the SQLite schema and storage code. Manual analyses and feedback are stored there. Gmail scan results stay in the Gmail view.
+- `PhishGuard/` is a separate prototype with its own setup.
 
-The system uses a machine learning model to analyse email content, identify potentially malicious messages, calculate phishing risk scores, and provide explanations for predictions.
+## Install
 
-PhishGuard also supports email quarantine, restoration, deletion, and user feedback to assist with reviewing potentially incorrect classifications.
-
-## 2. Key Features
-
-- **Email Analysis:** Analyse email sender information, subject lines, and message content.
-- **Machine Learning Detection:** Classify emails and generate phishing risk scores.
-- **Explainable Results:** Display reasons contributing to phishing predictions.
-- **Dashboard:** View email statistics and detection summaries.
-- **Email Quarantine:** Move potentially dangerous emails into quarantine.
-- **Email Restoration:** Restore quarantined messages to the inbox.
-- **Feedback System:** Record feedback when users identify possible false positives.
-- **Permanent Deletion:** Delete emails and their related analysis records.
-- **Demo Authentication:** Support local demonstration login.
-- **Automated Testing:** Validate backend APIs and email workflows.
-
-## 3. System Architecture
-
-PhishGuard consists of four main components:
-
-| Component | Technology | Responsibility |
-|---|---|---|
-| Frontend | HTML, CSS, JavaScript | User interface and email management |
-| Backend | Python, Flask | REST API and application logic |
-| Machine Learning | Python, scikit-learn | Email classification and risk scoring |
-| Database | SQLite | Store emails, analysis results, and feedback |
-
-### Data Flow
-
-1. An email is submitted for analysis.
-2. The Flask backend extracts relevant email features.
-3. The backend sends the features to the machine learning API.
-4. The ML service returns a classification, risk score, and explanation.
-5. The backend validates and stores the analysis result.
-6. The frontend displays the result to the user.
-7. Users can quarantine, restore, or delete messages.
-8. Restoring a phishing-classified email can generate feedback for review.
-
-## 4. Installation
-
-### Prerequisites
-
-- Windows 10 or Windows 11
-- Python and pip
-- Git
-- Visual Studio Code (recommended)
-
-The project has been tested locally using Python 3.15.2.
-
-### Clone the Repository
-
-```powershell
-git clone https://github.com/sychivan/advanced-phishing-detection.git
-cd advanced-phishing-detection
-```
-
-### Create a Virtual Environment
+Use Windows PowerShell, Python 3.15.2, and Node.js for the dashboard tests. From the repository root, create a virtual environment only if one has not already been set up.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt -r ml/requirements.txt pytest
 ```
 
-### Install Dependencies
-
-The repository contains dependency files for the machine learning and PhishGuard components:
+### Select the interpreter in each demo terminal
 
 ```powershell
-python -m pip install -r ml/requirements.txt
-python -m pip install -r PhishGuard/requirements.txt
-python -m pip install pytest
+$DemoPython = (Resolve-Path '.venv/Scripts/python.exe').Path
+& $DemoPython --version
 ```
 
-Dependency installation may require adjustments depending on the Python version and operating system.
-
-## 5. Running the Application
-
-Run the following services in separate terminals from the project root directory.
-
-### Terminal 1 – Machine Learning API
+If the existing launcher cannot access its base Python, this Capstone workspace has a verified Python 3.15.2 fallback. It uses the packages already installed in the virtual environment. This fallback is local to this workspace.
 
 ```powershell
-.\.venv\Scripts\python.exe ml/model_api.py
+$DemoPython = (Resolve-Path '.venv/demo-runtime/python.exe').Path
+$env:PYTHONPATH = (Resolve-Path '.venv/Lib/site-packages').Path
+$env:PYTHONDONTWRITEBYTECODE = '1'
+& $DemoPython --version
 ```
 
-ML service:
+## Run locally
 
-`http://127.0.0.1:5001`
-
-### Terminal 2 – Flask Backend
-
-Configure the local demo environment:
+If demo credentials have not been saved, run this one-time command. It uses hidden prompts, keeps existing settings, and fills in the local model URL if missing.
 
 ```powershell
-$env:AI_MODEL_URL="http://127.0.0.1:5001/predict"
-$env:DEMO_EMAIL="demo@phishguard.local"
-$env:DEMO_PASSWORD="1"
-$env:ADMIN_EMAIL="demo@phishguard.local"
-
-.\.venv\Scripts\python.exe backend/app.py
+& $DemoPython -m backend.local_config setup-demo
 ```
 
-Backend service:
-
-`http://127.0.0.1:5000`
-
-The example credentials are intended only for local demonstration. They must not be used for production deployment.
-
-### Terminal 3 – Frontend
+In terminal 1, start V1.
 
 ```powershell
-.\.venv\Scripts\python.exe -m http.server 5500
+& $DemoPython ml/model_api.py
 ```
 
-Open the application:
-
-`http://127.0.0.1:5500/phishguard-frontend.html`
-
-### Demo Login
-
-Email: `demo@phishguard.local`
-
-Password: `1`
-
-### Gmail test inbox
-
-1. In Google Cloud, enable the Gmail API. Set the OAuth audience to **External** with publishing status **Testing**, and add a Gmail test account under **Test users**.
-2. Create a **Web application** OAuth client and add `http://127.0.0.1:5000/gmail/callback` under **Authorized redirect URIs**. Add the Gmail read-only scope (`https://www.googleapis.com/auth/gmail.readonly`) to the app's data access configuration.
-3. Start the ML API as above. In the backend PowerShell terminal, set:
+In terminal 2, select the interpreter again and start Flask. The commands below use the verified **synthetic demo database** from the final rehearsal. Setup registers V1 and keeps existing rows. On a fresh workspace, the same commands create the file in `.venv`.
 
 ```powershell
-$env:GOOGLE_CLIENT_ID = "your-client-id"
-$env:GOOGLE_CLIENT_SECRET = "your-client-secret"
-$env:GOOGLE_REDIRECT_URI = "http://127.0.0.1:5000/gmail/callback"
-$env:AI_MODEL_URL = "http://127.0.0.1:5001/predict"
-$env:PHISHGUARD_SESSION_SECRET = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
-.\.venv\Scripts\python.exe backend/app.py
+$env:PHISHGUARD_DB_PATH = Join-Path $PWD '.venv/phishguard-capstone-final-20261122.sqlite3'
+& $DemoPython -m backend.setup_db
+& $DemoPython backend/app.py
 ```
 
-Keep the credentials in the backend environment and out of Git. Open the frontend and select **Sign in with Google**, or open `http://127.0.0.1:5000/gmail/` directly. Sign in with the test account, grant read-only access and select **Scan up to 5 inbox messages**. PhishGuard sends message features to the configured model API. Use the local model when testing with personal mail.
+Flask loads the Git-ignored `.env.phishguard.json` from the workspace root. Explicit process settings override it. Keeping the demo database override separate preserves the existing workspace database, `database/analysis.db`.
 
-Gmail results appear on the Gmail scan page. The scan runs on demand and stores the access token in the backend process for the session. Restarting Flask, signing out or reaching token expiration requires reconnecting. Sign-out clears the local session. Use your Google Account settings to remove the standing grant.
+Example nonsecret local settings:
 
-This is a local test flow. Public Gmail access requires Google verification for the restricted scope and a production deployment with HTTPS and managed sessions.
+```json
+{
+  "AI_MODEL_URL": "http://127.0.0.1:5001/predict",
+  "GOOGLE_REDIRECT_URI": "http://127.0.0.1:5000/gmail/callback"
+}
+```
 
-## 6. Main API Endpoints
+Use the setup commands to enter credentials locally. Keep the private file and Google exports out of Git.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/api/health` | Check backend health |
-| POST | `/api/analyse-email` | Analyse an email |
-| GET | `/api/stats` | Retrieve dashboard statistics |
-| GET | `/api/messages` | Retrieve messages |
-| GET | `/api/messages/<id>` | Retrieve message details |
-| POST | `/api/messages/<id>/quarantine` | Quarantine an email |
-| POST | `/api/messages/<id>/restore` | Restore an email |
-| DELETE | `/api/messages/<id>` | Delete an email |
-| POST | `/api/auth/login` | Demo login |
-| POST | `/api/auth/logout` | Demo logout |
-| POST | `/api/feedback` | Submit classification feedback |
-| GET | `/api/feedback/<id>` | Retrieve feedback |
-| POST | `/api/feedback/<id>/review` | Review feedback |
+- [Flask health](http://127.0.0.1:5000/api/health)
+- [V1 health](http://127.0.0.1:5001/health)
+- [Dashboard](http://127.0.0.1:5000/gmail/app)
 
-## 7. Automated Testing
+## Gmail test inbox
 
-The backend includes automated tests for API behaviour, email processing, database storage, and message workflows.
+Use the existing Google **Web application** client, enable Gmail API, and add the dedicated test account in Google Cloud **Testing**. Register `http://127.0.0.1:5000/gmail/callback` exactly. PhishGuard requests the Gmail read-only scope.
 
-Run all discovered tests:
+If Gmail has not been set up locally, import the existing Web client export once.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -v --tb=short
+& $DemoPython -m backend.local_config setup-gmail --google-export 'C:\path\google-web-client.json'
 ```
 
-### Latest Local Test Results
+Omit the export option to use hidden local prompts. Restart Flask to load newly saved settings. Open [Gmail consent](http://127.0.0.1:5000/gmail/connect?view=dashboard) using the dedicated account. The HTTP rehearsal verified the redirect to Google. The project owner separately reported completion of the browser Gmail workflow. [Setup and troubleshooting](backend/CAPSTONE_2_DEMO.md#gmail-configuration-handoff)
 
-**9 tests passed (18 November 2026).**
+## Tests
 
-Verified tests include:
+Run the shared suites from an isolated copy of the repository without the private local configuration. Point `PHISHGUARD_DB_PATH` at a disposable SQLite file and keep real credentials out of the test process. The tests mock Google.
 
-- Email analysis
-- Backend health check
-- Invalid AI response handling
-- Missing subject validation
-- Valid AI response handling
-- Email deletion
-- Feedback database storage
-- Email quarantine
-- Email restoration with feedback creation
+```powershell
+& $DemoPython -m pytest backend -q --tb=short -p no:cacheprovider
+node --test backend/test_gmail_dashboard.cjs
+```
 
-These tests verify selected backend behaviours. They do not constitute a complete security or production-readiness assessment.
+Avoid repository-wide test discovery. The legacy SQLite smoke scripts write records, and the ML audit scripts can run dataset evaluations. See [safe SQLite verification](database/README.md#setup-and-testing) and [E11 evidence](backend/evidence/E11-20261122-122951-share/README.md) for the broader isolated run, which also included local ML regression suites.
 
-## 8. Database
+## Limits and documentation
 
-PhishGuard uses SQLite to store email records, model information, analysis results, and user feedback.
+- V1 uses text and its binary cutoff is **50**. It can flag legitimate messages and does not verify sender identity or attachments.
+- The stored-message dashboard groups scores at **40 and 70**. Its percentages are shares of stored messages in those bands. Model accuracy requires labelled evaluation data.
+- Authentication and OAuth sessions are intended for a local demo. Restarting Flask requires signing in again.
 
-Relevant database files include:
-
-- `database/schema.sql`
-- `database/init_db.py`
-- `database/storage.py`
-- `database/test_storage.py`
-
-Local database files are excluded from Git version control.
-
-## 9. Known Limitations
-
-PhishGuard is currently a university demonstration system.
-
-- Email analysis primarily relies on email text features.
-- Sender authenticity and attachments are not fully verified.
-- Authentication uses a simplified local demo configuration.
-- Administrative access is not a production-ready role-based permission system.
-- The ML model requires a separate running service.
-- Real-world email ingestion and production deployment require additional integration and security work.
-
-## 10. Project Status
-
-The core backend, ML API integration, database operations, and frontend workflows have been demonstrated locally.
-
-Automated backend testing completed successfully with 9 passing tests.
-
-Additional integration testing, security hardening, deployment configuration, and documentation may be required before production use.
-
-## 11. Team Contributions
-
-The project is developed collaboratively by a three-member capstone team.
-
-- **Frontend Development:** User interface, navigation, and frontend integration.
-- **Backend Development and AI Integration:** REST APIs, model communication, email workflows, and feedback integration.
-- **Machine Learning and Database Development:** Model training, prediction service, and database-related development.
-
-## 12. Academic Purpose
-
-PhishGuard was developed for educational and demonstration purposes as part of the Capstone 3004 project at Victoria University.
+[Demo script and backend contribution](backend/CAPSTONE_2_DEMO.md) · [API reference](backend/CAPSTONE_2_DEMO.md#api-reference) · [Database](database/README.md) · [V1 and ML notes](ml/README.md)
