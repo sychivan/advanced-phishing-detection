@@ -1,0 +1,34 @@
+E11C | Independent SQLite checks
+Source: current local run with two separate disposable databases
+Start: 2026-11-22T12:30:00.377422+11:00 Australia/Sydney
+End: 2026-11-22T12:30:07.312790+11:00 Australia/Sydney
+
+[1/2] Configured check, one-time PHISHGUARD_DB_PATH
+& $DemoPython -m backend.setup_db
+Backend database is ready with V1 registered.
+Exit code (setup): 0
+& $DemoPython -m database.check_storage
+PASS: Saved and retrieved the model prediction
+Analysis ID: 1
+Classification: Safe
+Score: 36.98
+PASS: Invalid model reference rejected; email insert rolled back
+Exit code (check): 0
+Result: PASS | Save, read and rollback check
+
+[2/2] Legacy check in copied directory layout
+& $DemoPython database/init_db.py
+Database ready: [temporary run]/legacy-layout/database/analysis.db
+Tables: analysis_results, emails, feedback, model_versions
+Exit code (init): 0
+& $DemoPython database/test_storage.py
+Successfully saved and retrieved:
+Analysis ID: 1
+Subject: Account suspended
+Classification: Phishing
+Model score: 80.91
+Model version ID: 1
+Exit code (test): 0
+Result: PASS | Saved and retrieved a synthetic prediction
+
+The temporary layout contains source copies and the saved V1 artifact. Its SQLite files are disposable.

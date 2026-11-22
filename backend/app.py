@@ -1,23 +1,31 @@
 
-from services.response_validator import validate_ai_response
-from services.email_parser import extract_email_features
+import os
+import re
+import secrets
+import sqlite3
+import sys
+import time
+from functools import wraps
+from pathlib import Path
+from threading import Lock
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
+
 from services.ai_service import analyse_with_ai
-
-
-import os
-import secrets
-from functools import wraps
-
-import sys
-from pathlib import Path
+from services.email_parser import extract_email_features
+from services.gmail import GmailRequestHandler, configure as configure_gmail
+from services.response_validator import validate_ai_response
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from backend.local_config import load_local_config
+
+load_local_config()
 
 from database.storage import (
     save_model_response,
@@ -35,34 +43,68 @@ DEMO_EMAIL = os.getenv("DEMO_EMAIL")
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
-active_tokens = set()
+TOKEN_LIFETIME = 3600
+MAX_SQLITE_ID = (1 << 63) - 1
+active_tokens = {}
+token_lock = Lock()
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 200_000
+configure_gmail(app)
+origins = [
+    origin.strip() for origin in os.getenv(
+        "PHISHGUARD_CORS_ORIGINS", "http://127.0.0.1:5500,http://localhost:5500"
+    ).split(",") if origin.strip()
+]
+if any("*" in origin for origin in origins):
+    raise ValueError("PHISHGUARD_CORS_ORIGINS requires explicit origins")
+origin_patterns = [re.compile(r"\A" + re.escape(origin) + r"\Z") for origin in origins]
 CORS(
     app,
-    resources={r"/api/*": {"origins": [
-        "http://127.0.0.1:5500",
-        "http://localhost:5500"
-    ]}},
-    supports_credentials=True
+    resources={r"/api/.*": {"origins": origin_patterns}},
+    allow_headers=["Authorization", "Content-Type"],
+    methods=["GET", "POST", "DELETE", "OPTIONS"],
 )
+
+
+@app.after_request
+def private_api_response(response):
+    if request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    response = error.get_response()
+    if request.path.startswith("/api/"):
+        response.set_data(app.json.dumps({"error": error.name, "message": error.name}))
+        response.mimetype = "application/json"
+    return response
+
+
+def bearer_token():
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    return token.strip() if scheme.lower() == "bearer" else ""
+
 
 def require_auth(func):
     """Require a valid login token for protected API routes."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        auth = request.headers.get("Authorization", "")
-
-        if not auth.startswith("Bearer "):
+        token = bearer_token()
+        if not token:
             return jsonify({
                 "message": "Authentication required"
             }), 401
 
-        token = auth.removeprefix("Bearer ").strip()
-
-        if not token or token not in active_tokens:
+        with token_lock:
+            authenticated = active_tokens.get(token, 0) > time.monotonic()
+            if not authenticated:
+                active_tokens.pop(token, None)
+        if not authenticated:
             return jsonify({
                 "message": "Invalid or expired token"
             }), 401
@@ -101,7 +143,7 @@ def create_feedback():
     analysis_id = data.get("analysis_id")
     suggested_label = data.get("suggested_label")
 
-    if type(analysis_id) is not int or analysis_id <= 0:
+    if type(analysis_id) is not int or not 1 <= analysis_id <= MAX_SQLITE_ID:
         return jsonify({
             "message": "Valid analysis_id is required"
         }), 400
@@ -130,7 +172,7 @@ def create_feedback():
         }), 400
 
     except Exception:
-        app.logger.exception("Failed to submit feedback")
+        app.logger.error("Failed to submit feedback")
         return jsonify({
             "message": "Unable to submit feedback"
         }), 500
@@ -150,7 +192,7 @@ def view_feedback(feedback_id):
         return jsonify(feedback), 200
 
     except Exception:
-        app.logger.exception("Failed to retrieve feedback")
+        app.logger.error("Failed to retrieve feedback")
         return jsonify({
             "message": "Unable to retrieve feedback"
         }), 500
@@ -192,7 +234,7 @@ def review_feedback_api(feedback_id):
         }), 400
 
     except Exception:
-        app.logger.exception("Failed to review feedback")
+        app.logger.error("Failed to review feedback")
         return jsonify({
             "message": "Unable to review feedback"
         }), 500
@@ -215,11 +257,17 @@ def login():
         return jsonify({"message": "Demo login is not configured"}), 503
 
     if (
-        secrets.compare_digest(email, DEMO_EMAIL)
-        and secrets.compare_digest(password, DEMO_PASSWORD)
+        secrets.compare_digest(email.encode("utf-8", errors="surrogatepass"), DEMO_EMAIL.encode("utf-8"))
+        and secrets.compare_digest(
+            password.encode("utf-8", errors="surrogatepass"), DEMO_PASSWORD.encode("utf-8")
+        )
     ):
         token = secrets.token_urlsafe(32)
-        active_tokens.add(token)
+        with token_lock:
+            now = time.monotonic()
+            for expired in [key for key, deadline in active_tokens.items() if deadline <= now]:
+                active_tokens.pop(expired)
+            active_tokens[token] = now + TOKEN_LIFETIME
 
         return jsonify({
             "token": token,
@@ -234,10 +282,8 @@ def login():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def logout():
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-
-    active_tokens.discard(token)
+    with token_lock:
+        active_tokens.pop(bearer_token(), None)
 
     return jsonify({"message": "Logged out successfully"})
 
@@ -254,6 +300,7 @@ def health():
     return jsonify({"status": "success"})
 
 @app.route("/api/analyse-email", methods=["POST"])
+@require_auth
 def analyse_email():
     data = request.get_json(silent=True)
 
@@ -269,47 +316,41 @@ def analyse_email():
         return jsonify({
             "error": "Sender, subject and body are required"
         }), 400
-    
+
+    fields = {"sender": (sender, 500), "subject": (subject, 500), "body": (body, 12_000)}
+    for name, (value, limit) in fields.items():
+        try:
+            value.encode("utf-8")
+        except UnicodeError:
+            return jsonify(error=f"{name} must contain valid Unicode"), 400
+        if len(value) > limit:
+            return jsonify(error=f"{name} must be at most {limit} characters"), 400
+
     features = extract_email_features(sender, subject, body)
 
-    # Analyse email using the connected AI model
-    ai_result = analyse_with_ai(features)
+    ai_result = analyse_with_ai(features, local_only=True)
 
-    if ai_result.get("model_status") == "connected":
-        try:
-            ai_result = validate_ai_response(ai_result)
-        except ValueError:
-            return jsonify({
-                "error": "Invalid AI model response",
-                "model_status": "invalid_response"
-            }), 502
+    model_status = ai_result["model_status"]
+    if model_status != "connected":
+        status = {"not_connected": 503, "manual_review": 422}.get(model_status, 502)
+        return jsonify(error=ai_result["reasons"][0], analysis_id=None, **ai_result), status
 
-        try:
-            analysis_id = save_model_response(
-                sender,
-                subject,
-                body,
-                ai_result
-            )
-        except (ValueError, OSError) as error:
-            app.logger.error("Database save failed: %s", error)
-            return jsonify({
-                "error": "Unable to save analysis",
-                "model_status": "storage_error"
-            }), 500
+    try:
+        ai_result = validate_ai_response(ai_result)
+    except ValueError:
+        return jsonify(error="Invalid AI model response", model_status="invalid_response"), 502
 
-    
-    return jsonify({
-    "classification": ai_result["classification"],
-    "risk_score": ai_result["risk_score"],
-    "model_status": ai_result["model_status"],
-    "reasons": ai_result["reasons"],
-    "features": features,
-    "analysis_id": analysis_id if ai_result["model_status"] == "connected" else None
-})
+    try:
+        analysis_id = save_model_response(sender, subject, body, ai_result)
+    except (ValueError, OSError, sqlite3.Error):
+        app.logger.error("Database save failed")
+        return jsonify(error="Unable to save analysis", model_status="storage_error"), 500
+
+    return jsonify(**ai_result, features=features, analysis_id=analysis_id)
 
 
 @app.route("/api/stats", methods=["GET"])
+@require_auth
 def get_stats():
     try:
         inbox = list_messages("inbox")
@@ -328,7 +369,6 @@ def get_stats():
             1 for m in messages if m["score"] < 40
         )
 
-        from collections import defaultdict
         from datetime import datetime, timedelta
 
         today = datetime.now().date()
@@ -357,7 +397,7 @@ def get_stats():
         }), 200
 
     except Exception:
-        app.logger.exception("Failed to retrieve statistics")
+        app.logger.error("Failed to retrieve statistics")
         return jsonify({"error": "Unable to retrieve statistics"}), 500
 
 
@@ -373,7 +413,7 @@ def quarantine_email(message_id):
         return jsonify({"error": str(error)}), 404
 
     except Exception:
-        app.logger.exception("Failed to quarantine email")
+        app.logger.error("Failed to quarantine email")
         return jsonify({"error": "Unable to quarantine email"}), 500
 
 
@@ -388,11 +428,12 @@ def restore_email(message_id):
         return jsonify({"error": str(error)}), 404
 
     except Exception:
-        app.logger.exception("Failed to restore email")
+        app.logger.error("Failed to restore email")
         return jsonify({"error": "Unable to restore email"}), 500
 
 
 @app.route("/api/messages/<int:message_id>", methods=["GET"])
+@require_auth
 def get_message(message_id):
     try:
         message = get_message_by_id(message_id)
@@ -403,11 +444,12 @@ def get_message(message_id):
         return jsonify(message), 200
 
     except Exception:
-        app.logger.exception("Failed to retrieve email")
+        app.logger.error("Failed to retrieve email")
         return jsonify({"error": "Unable to retrieve email"}), 500
 
 
 @app.route("/api/messages/<int:message_id>", methods=["DELETE"])
+@require_auth
 def delete_email(message_id):
     try:
         result = delete_message(message_id)
@@ -417,11 +459,12 @@ def delete_email(message_id):
         return jsonify({"error": str(error)}), 404
 
     except Exception:
-        app.logger.exception("Failed to delete email")
+        app.logger.error("Failed to delete email")
         return jsonify({"error": "Unable to delete email"}), 500
 
 
 @app.route("/api/messages", methods=["GET"])
+@require_auth
 def get_messages():
     status = request.args.get("status", "inbox")
 
@@ -432,9 +475,9 @@ def get_messages():
         messages = list_messages(status)
         return jsonify(messages), 200
     except Exception:
-        app.logger.exception("Failed to list messages")
+        app.logger.error("Failed to list messages")
         return jsonify({"error": "Unable to load messages"}), 500
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(host="127.0.0.1", port=5000, debug=False, request_handler=GmailRequestHandler)

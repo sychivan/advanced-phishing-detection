@@ -11,7 +11,7 @@ def validate_ai_response(result):
 
     allowed = {"Phishing", "Safe", "Suspicious"}
 
-    if classification not in allowed:
+    if not isinstance(classification, str) or classification not in allowed:
         raise ValueError("Invalid classification")
 
     if (

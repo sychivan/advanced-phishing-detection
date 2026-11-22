@@ -1,7 +1,7 @@
 
-from multiprocessing.dummy import connection
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -39,8 +39,9 @@ class TestMessageWorkflow(unittest.TestCase):
                 """
                 INSERT INTO model_versions
                 (id, version, artifact_hash, metrics_json)
-                VALUES (1, 'test-model', 'test-hash', '{}')
-                """
+                VALUES (1, 'test-model', ?, '{}')
+                """,
+                ("b" * 64,),
             )
 
             connection.execute(
@@ -65,15 +66,12 @@ class TestMessageWorkflow(unittest.TestCase):
 
         self.client = app.test_client()
         self.auth_patch = patch(
-    "app.active_tokens",
-    {"test-token"}
-)
+            "app.active_tokens", {"test-token": time.monotonic() + 3600}
+        )
         self.auth_patch.start()
         self.addCleanup(self.auth_patch.stop)
 
-        self.client.environ_base[
-    "HTTP_AUTHORIZATION"
-] = "Bearer test-token"
+        self.client.environ_base["HTTP_AUTHORIZATION"] = "Bearer test-token"
         
     def test_quarantine(self):
         response = self.client.post(
@@ -84,6 +82,26 @@ class TestMessageWorkflow(unittest.TestCase):
 
         message = storage.get_message_by_id(1)
         self.assertEqual(message["status"], "quarantine")
+
+    @patch("app.analyse_with_ai")
+    def test_analysis_can_be_listed_and_retrieved(self, mock_ai):
+        mock_ai.return_value = {
+            "classification": "Safe", "risk_score": 12, "reasons": ["Synthetic result"],
+            "model_status": "connected", "model_version": "test-model", "artifact_hash": "b" * 64,
+        }
+        response = self.client.post("/api/analyse-email", json={
+            "sender": "test@example.test", "subject": "Synthetic meeting",
+            "body": "The project meeting is tomorrow.",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.json["analysis_id"], 0)
+        messages = self.client.get("/api/messages?status=inbox").json
+        saved = next(message for message in messages if message["subject"] == "Synthetic meeting")
+        detail = self.client.get(f"/api/messages/{saved['id']}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json["score"], 12)
+        self.assertEqual(detail.json["body"], "The project meeting is tomorrow.")
+        self.assertEqual(self.client.get("/api/stats").json["total"], 2)
 
     def test_restore_creates_feedback(self):
         self.client.post("/api/messages/1/quarantine")
@@ -130,6 +148,19 @@ class TestMessageWorkflow(unittest.TestCase):
         self.assertIsNotNone(feedback)
         self.assertEqual(feedback["suggested_label"], "Safe")
         self.assertEqual(feedback["review_status"], "pending")
+
+    @patch("app.ADMIN_EMAIL", "reviewer@example.test")
+    @patch("app.DEMO_EMAIL", "reviewer@example.test")
+    def test_feedback_api_can_review_pending_feedback(self):
+        created = self.client.post("/api/feedback", json={
+            "analysis_id": 1, "suggested_label": "Safe",
+        })
+        self.assertEqual(created.status_code, 201)
+        path = f"/api/feedback/{created.json['feedback_id']}"
+        self.assertEqual(self.client.get(path).json["review_status"], "pending")
+        reviewed = self.client.post(path + "/review", json={"decision": "approved"})
+        self.assertEqual(reviewed.status_code, 200)
+        self.assertEqual(self.client.get(path).json["review_status"], "approved")
 
 
 if __name__ == "__main__":

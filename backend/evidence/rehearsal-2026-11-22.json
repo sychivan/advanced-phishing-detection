@@ -1,0 +1,62 @@
+{
+  "date_sydney": "2026-11-22",
+  "runtime": "3.15.2",
+  "automated_test_counts": {
+    "python_passed": 40,
+    "python_subtests_passed": 12,
+    "dashboard_javascript_passed": 6,
+    "failed": 0,
+    "gmail_google_transport": "mocked"
+  },
+  "v1_sha256": "633f1c0893b5f63c02097b6482485a7bcf221383759f31f65406ace70b8d5cae",
+  "current_shell_environment_presence": {
+    "DEMO_EMAIL": false,
+    "DEMO_PASSWORD": false,
+    "AI_MODEL_URL": false,
+    "PHISHGUARD_DB_PATH": false,
+    "GOOGLE_CLIENT_ID": false,
+    "GOOGLE_CLIENT_SECRET": false,
+    "GOOGLE_REDIRECT_URI": false,
+    "PHISHGUARD_SESSION_SECRET": false
+  },
+  "dotenv_paths_present": {
+    ".env": false,
+    "backend/.env": false,
+    "PhishGuard/.env": false
+  },
+  "checks": {
+    "existing_backend_health": "success",
+    "existing_v1_health": "connected",
+    "existing_dashboard_http": 200,
+    "existing_gmail_connect_http": 503,
+    "isolated_backend_pid": 40880,
+    "demo_login_http": 200,
+    "prediction": {
+      "classification": "Phishing",
+      "risk_score": 85.92,
+      "model_status": "connected",
+      "reason_count": 2
+    },
+    "overview_counts": {
+      "total": 1,
+      "phishing": 1,
+      "quarantined": 0
+    },
+    "quarantine_then_restore": [
+      "quarantine",
+      "inbox"
+    ],
+    "restored_score_unchanged": true,
+    "logout_http": 200,
+    "revoked_bearer_http": 401,
+    "served_dashboard_adapter": "passed via Node VM and real HTTP; no browser interaction",
+    "disposable_persistence": {
+      "messages": 1,
+      "analyses": 1
+    },
+    "disposable_cleanup": true,
+    "existing_services_still_healthy": true
+  },
+  "browser_evidence": "unavailable; native automation pipe absent",
+  "live_google_access": false
+}

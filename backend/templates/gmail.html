@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gmail · PhishGuard</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #10151e; color: #ecf2ff; }
+  main { max-width: 52rem; margin: 3rem auto; padding: 0 1.25rem; }
+  a { color: #a9c1ff; }
+  .card { background: #172031; border: 1px solid #33425b; border-radius: .8rem; padding: 1.25rem; margin: 1rem 0; overflow-wrap: anywhere; }
+  form { display: inline-block; margin: .25rem .5rem .25rem 0; }
+  button, .button { display: inline-block; border: 0; border-radius: .45rem; padding: .65rem 1rem; background: #a9c1ff; color: #10151e; font: inherit; font-weight: 650; cursor: pointer; text-decoration: none; }
+  [role=alert] { color: #ffb5ae; }
+  .prediction-note { border-left: .25rem solid #ffd88a; padding-left: .75rem; }
+</style>
+<main>
+  <a href="{{ url_for('gmail.inbox') }}">PhishGuard</a>
+  <h1>Gmail inbox scan</h1>
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  {% if email %}
+  <p>Connected as {{ email }}.</p>
+  <form action="{{ url_for('gmail.scan') }}" method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button>Scan up to 5 inbox messages</button>
+  </form>
+  <form action="{{ url_for('gmail.disconnect') }}" method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button>Disconnect Gmail</button>
+  </form>
+  <p>Disconnect ends this PhishGuard session. You can remove the Google grant separately in your Google Account.</p>
+  {% else %}
+  <p>Sign in with Google and allow read-only inbox access to check recent messages for phishing.</p>
+  <a class="button" href="{{ url_for('gmail.connect') }}">Sign in with Google</a>
+  {% endif %}
+  {% if messages is not none %}
+  <h2>Scan results</h2>
+  <p class="prediction-note"><strong>V1 predictions can be wrong.</strong> Legitimate messages can be flagged, and harmful messages can be missed. Verify suspected phishing independently before acting. Scanning is read-only and leaves your Gmail messages in place.</p>
+  {% for message in messages %}
+  <article class="card">
+    <h3>{{ message.subject }}</h3>
+    <p>{{ message.sender }}</p>
+    <strong>{% if message.risk_score is not none %}Prediction: {{ message.classification }} · {{ message.risk_score }} / 100{% else %}{{ message.classification }} · No score{% endif %}</strong>
+    <details>
+      <summary>{% if message.risk_score is not none %}Why this score?{% else %}Why no score?{% endif %}</summary>
+      <ul>{% for reason in message.reasons %}<li>{{ reason }}</li>{% else %}<li>V1 did not provide an explanation for this result.</li>{% endfor %}</ul>
+    </details>
+  </article>
+  {% else %}
+  <p>No messages in the inbox.</p>
+  {% endfor %}
+  {% endif %}
+</main>
+</html>
