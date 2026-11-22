@@ -103,6 +103,7 @@ class TestMessageWorkflow(unittest.TestCase):
         self.assertEqual(detail.json["body"], "The project meeting is tomorrow.")
         self.assertEqual(self.client.get("/api/stats").json["total"], 2)
 
+    @patch("app.DEMO_EMAIL", "reviewer@example.test")
     def test_restore_creates_feedback(self):
         self.client.post("/api/messages/1/quarantine")
 
@@ -118,7 +119,7 @@ class TestMessageWorkflow(unittest.TestCase):
         with closing(storage.connect()) as connection:
             feedback = connection.execute(
                 """
-                SELECT suggested_label, review_status
+                SELECT suggested_label, review_status, submitted_by
                 FROM feedback
                 WHERE analysis_id = 1
                 """
@@ -127,6 +128,7 @@ class TestMessageWorkflow(unittest.TestCase):
         self.assertIsNotNone(feedback)
         self.assertEqual(feedback["suggested_label"], "Safe")
         self.assertEqual(feedback["review_status"], "pending")
+        self.assertEqual(feedback["submitted_by"], "reviewer@example.test")
 
     def test_delete(self):
         response = self.client.delete(

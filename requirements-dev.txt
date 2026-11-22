@@ -1,0 +1,5 @@
+# Install after backend/requirements.txt and ml/requirements.txt.
+pytest>=9.2,<10
+# Needed only to import and isolate the retained legacy prototype in its tests.
+cryptography>=42
+python-dotenv>=1.0

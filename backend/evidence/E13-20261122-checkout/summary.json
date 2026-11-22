@@ -1,0 +1,43 @@
+{
+  "completed_utc": "2026-11-22T03:37:01.514158+00:00",
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "versions": {
+    "Flask": "3.1.3",
+    "pytest": "9.2.0",
+    "scikit-learn": "1.9.1",
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "joblib": "1.6.0"
+  },
+  "isolation": "Disposable source and SQLite copies; no inherited credentials; Python network blocked except loopback HTTP smoke; Google and browser fetch mocked; no training or corpus evaluation",
+  "steps": [
+    {
+      "step": "python",
+      "exit_code": 0
+    },
+    {
+      "step": "javascript",
+      "exit_code": 0
+    },
+    {
+      "step": "sqlite-setup",
+      "exit_code": 0
+    },
+    {
+      "step": "sqlite-check",
+      "exit_code": 0
+    },
+    {
+      "step": "legacy-sqlite-init",
+      "exit_code": 0
+    },
+    {
+      "step": "legacy-sqlite-check",
+      "exit_code": 0
+    },
+    {
+      "step": "http-workflow",
+      "exit_code": 0
+    }
+  ]
+}

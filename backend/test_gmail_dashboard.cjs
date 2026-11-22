@@ -10,16 +10,30 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 class TestElement {
   constructor() {
     this.children = new Map();
+    this.matches = new Map();
     this.isConnected = true;
-    this.classList = { contains: () => false, add: () => {}, remove: () => {} };
+    const classes = new Set();
+    this.classList = {
+      contains: value => classes.has(value),
+      add: value => classes.add(value),
+      remove: value => classes.delete(value),
+    };
   }
 
   set innerHTML(markup) {
     for (const child of this.children.values()) child.detach();
+    for (const elements of this.matches.values()) elements.forEach(element => element.detach());
     this.children.clear();
+    this.matches.clear();
     for (const match of markup.matchAll(/\bid="([^"]+)"/g)) {
       this.children.set('#' + match[1], new TestElement());
     }
+    const chips = [...markup.matchAll(/<button class="chip" data-f="([^"]+)"/g)].map(match => {
+      const chip = new TestElement();
+      chip.dataset = { f: match[1] };
+      return chip;
+    });
+    if (chips.length) this.matches.set('.chip', chips);
     this.markup = markup;
   }
 
@@ -28,6 +42,7 @@ class TestElement {
   detach() {
     this.isConnected = false;
     for (const child of this.children.values()) child.detach();
+    for (const elements of this.matches.values()) elements.forEach(element => element.detach());
   }
 
   querySelector(selector) {
@@ -40,7 +55,13 @@ class TestElement {
   }
 
   focus() {}
-  querySelectorAll() { return []; }
+  remove() { this.detach(); }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  querySelectorAll(selector) {
+    return [...(this.matches.get(selector) || []),
+      ...[...this.children.values()].flatMap(child => child.querySelectorAll(selector))];
+  }
   appendChild() {}
   setAttribute() {}
 }
@@ -58,12 +79,14 @@ function scoredMessage(index) {
   };
 }
 
-async function openDashboard({ messages = [], demoSignedIn = false, demoData } = {}) {
+async function openDashboard({ messages = [], demoSignedIn = false, demoData, initialHash } = {}) {
   const document = new TestElement();
-  document.innerHTML = '<div id="app"></div><div id="drawer"></div><div id="overlay"></div>';
+  document.innerHTML = '<div id="app"></div><div id="drawer"></div><div id="overlay"></div><div id="toasts"></div>'
+    + '<dialog id="confirm"></dialog><h2 id="confirm-title"></h2><p id="confirm-msg"></p>'
+    + '<button id="confirm-yes"></button><button id="confirm-no"></button>';
   document.addEventListener = () => {};
   document.createElement = () => new TestElement();
-  const location = new URL('http://127.0.0.1:5000/gmail/app' + (demoData ? '#/overview' : '#/mail'));
+  const location = new URL('http://127.0.0.1:5000/gmail/app' + (initialHash || (demoData ? '#/overview' : '#/mail')));
   const session = {
     connection: demoData ? { connected: false } : { connected: true, email: gmailEmail, csrf: 'synthetic-session-one' },
     scanStatus: 200,
@@ -79,6 +102,8 @@ async function openDashboard({ messages = [], demoSignedIn = false, demoData } =
   const events = new Map();
   const context = vm.createContext({
     document, location, URL, URLSearchParams,
+    // The production mock adapter has artificial delays, not real network I/O.
+    setTimeout: callback => setImmediate(callback),
     history: { replaceState: (_data, _unused, hash) => { location.hash = hash; } },
     sessionStorage: {
       getItem: key => storage.get(key),
@@ -98,10 +123,14 @@ async function openDashboard({ messages = [], demoSignedIn = false, demoData } =
       });
       if (url === '/gmail/session') return response(200, session.connection);
       if (demoData && url.startsWith(location.origin + '/api/')) {
-        assert.equal(method, 'GET');
         assert.equal(options.headers.Authorization, 'Bearer synthetic-demo-bearer');
         const resource = url.slice(location.origin.length);
         assert.ok(Object.hasOwn(demoData, resource), 'Unexpected demo resource');
+        if (typeof demoData[resource] === 'function') {
+          const result = await demoData[resource]({ method, options });
+          return response(result.status, result.body);
+        }
+        assert.equal(method, 'GET');
         return response(200, demoData[resource]);
       }
       assert.equal(method, 'POST');
@@ -125,6 +154,8 @@ async function openDashboard({ messages = [], demoSignedIn = false, demoData } =
   const element = selector => document.querySelector(selector);
   return {
     element, location, calls, session,
+    mock: vm.runInContext('MockAdapter', context),
+    localSession: vm.runInContext('Session', context),
     scan: () => element('#gmail-scan').onclick(),
     signOut: () => element('#logout').onclick({ currentTarget: element('#logout') }),
     navigate: async hash => {
@@ -262,4 +293,197 @@ test('a scan that finishes while signing out cannot render mailbox results', asy
   assert.doesNotMatch(dashboard.element('#main').innerHTML, /Synthetic sample/);
   await dashboard.navigate();
   assert.match(dashboard.element('#app').innerHTML, /Sign in with Google/);
+});
+
+test('a delayed local message detail cannot reopen the drawer on the sign-in page', async () => {
+  const row = {
+    id: 'delayed-message', subject: 'Synthetic delayed detail',
+    from: { name: 'Synthetic Sender', email: 'sender@example.test' },
+    receivedAt: '2026-11-22T00:00:00Z', score: 69.99, status: 'quarantine',
+  };
+  let finishDetail;
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': { total: 1, safe: 0, suspicious: 1, phishing: 0, quarantined: 1, daily: [] },
+      '/api/messages?status=quarantine': [row],
+      '/api/messages/delayed-message': new Promise(resolve => { finishDetail = resolve; }),
+    },
+  });
+  await dashboard.navigate('#/quarantine?open=delayed-message');
+  await dashboard.navigate('#/login');
+  finishDetail({ ...row, body: 'Synthetic private body', classification: 'Phishing' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(dashboard.element('#app').innerHTML, /Sign in with Google/);
+  assert.equal(dashboard.element('#drawer').classList.contains('open'), false);
+  assert.doesNotMatch(dashboard.element('#drawer').innerHTML, /Synthetic private body/);
+});
+
+test('an old Overview response cannot change the current quarantine badge', async () => {
+  let finishStats;
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': new Promise(resolve => { finishStats = resolve; }),
+      '/api/messages?status=quarantine': [],
+    },
+  });
+  await dashboard.navigate('#/quarantine');
+  assert.equal(dashboard.element('#q-count').textContent, '');
+  finishStats({ total: 3, safe: 0, suspicious: 0, phishing: 3, quarantined: 3, daily: [] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dashboard.element('#q-count').textContent, '');
+  assert.match(dashboard.element('#q-body').innerHTML, /Quarantine is empty/);
+});
+
+test('leaving a local message removes its body from the closed drawer', async () => {
+  const row = {
+    id: 'shown-message', subject: 'Synthetic shown detail',
+    from: { name: 'Synthetic Sender', email: 'sender@example.test' },
+    receivedAt: '2026-11-22T00:00:00Z', score: 40.24, status: 'quarantine',
+    body: 'Synthetic private body', classification: 'Safe',
+  };
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': { total: 1, safe: 0, suspicious: 1, phishing: 0, quarantined: 1, daily: [] },
+      '/api/messages?status=quarantine': [row],
+      '/api/messages/shown-message': row,
+    },
+  });
+  await dashboard.navigate('#/quarantine?open=shown-message');
+  assert.match(dashboard.element('#drawer').innerHTML, /Synthetic private body/);
+  await dashboard.navigate('#/login');
+  assert.equal(dashboard.element('#drawer').classList.contains('open'), false);
+  assert.doesNotMatch(dashboard.element('#drawer').innerHTML, /Synthetic private body/);
+});
+
+test('mock quarantine and restore preserve the existing scores', async () => {
+  const { mock } = await openDashboard();
+  const low = await mock.getMessage('m3');
+  const high = await mock.getMessage('m1');
+  const quarantined = await mock.quarantine(low.id);
+  const restored = await mock.restore(high.id);
+  assert.equal(quarantined.status, 'quarantine');
+  assert.equal(quarantined.score, low.score);
+  assert.equal(restored.status, 'inbox');
+  assert.equal(restored.score, high.score);
+});
+
+test('unscored stored messages have a separate Overview category and daily segment', async () => {
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': {
+        total: 4, safe: 1, suspicious: 1, phishing: 1, unscored: 1, quarantined: 0,
+        daily: [{ date: '2026-11-22', safe: 2, phishing: 1, unscored: 1 }],
+      },
+      '/api/messages?status=quarantine': [],
+    },
+  });
+  const markup = dashboard.element('#main').innerHTML;
+  assert.match(markup, /No score/);
+  assert.match(markup, /25% of stored messages/);
+  assert.match(markup, /2 below 70, 1 at 70 or above, 1 without a score/);
+  assert.match(markup, /class="seg-unscored"/);
+  assert.match(markup, /Breakdown of 4 emails/);
+});
+
+test('No score filtering keeps missing analysis separate from a genuine zero and sorts it last', async () => {
+  const rows = [
+    { id: 'missing', subject: 'Missing analysis', score: null },
+    { id: 'zero', subject: 'Actual zero', score: 0 },
+    { id: 'high', subject: 'High score sample', score: 85.92 },
+  ].map(row => ({
+    ...row, from: { name: 'Synthetic Sender', email: 'sender@example.test' },
+    receivedAt: '2026-11-22T00:00:00Z', status: 'inbox', preview: 'Synthetic text',
+  }));
+  const dashboard = await openDashboard({
+    demoSignedIn: true, initialHash: '#/mail',
+    demoData: {
+      '/api/messages?status=inbox': rows,
+      '/api/messages?status=quarantine': [],
+    },
+  });
+  const selectFilter = filter => dashboard.element('#main').querySelectorAll('.chip')
+    .find(chip => chip.dataset.f === filter).onclick();
+  selectFilter('safe');
+  assert.match(dashboard.element('#mail-list').innerHTML, /Actual zero/);
+  assert.doesNotMatch(dashboard.element('#mail-list').innerHTML, /Missing analysis/);
+  selectFilter('unscored');
+  assert.match(dashboard.element('#mail-list').innerHTML, /Missing analysis/);
+  assert.doesNotMatch(dashboard.element('#mail-list').innerHTML, /Actual zero/);
+  selectFilter('all');
+  dashboard.element('#sort').onchange({ target: { value: 'score' } });
+  const order = [...dashboard.element('#mail-list').innerHTML.matchAll(/data-id="([^"]+)"/g)]
+    .map(match => match[1]);
+  assert.deepEqual(order, ['high', 'zero', 'missing']);
+});
+
+for (const action of ['restore', 'delete']) {
+  test(`partial bulk ${action} removes successful rows and keeps failed rows available to retry`, async () => {
+    const rows = ['succeeds', 'fails'].map(id => ({
+      id, subject: `Synthetic ${id}`, score: 40.24, status: 'quarantine',
+      from: { name: 'Synthetic Sender', email: 'sender@example.test' },
+      receivedAt: '2026-11-22T00:00:00Z',
+    }));
+    const resource = id => '/api/messages/' + id + (action === 'restore' ? '/restore' : '');
+    const dashboard = await openDashboard({
+      demoSignedIn: true, initialHash: '#/quarantine',
+      demoData: {
+        '/api/messages?status=quarantine': rows,
+        [resource('succeeds')]: ({ method }) => {
+          assert.equal(method, action === 'restore' ? 'POST' : 'DELETE');
+          return { status: 200, body: {} };
+        },
+        [resource('fails')]: () => ({ status: 503, body: { message: 'Synthetic service failure' } }),
+      },
+    });
+    dashboard.element('#sel-all').onchange({ target: { checked: true } });
+    const changing = dashboard.element('#bulk-' + action).onclick();
+    dashboard.element('#confirm-yes').onclick();
+    await changing;
+    const markup = dashboard.element('#q-body').innerHTML;
+    assert.doesNotMatch(markup, /data-id="succeeds"/);
+    assert.match(markup, /data-id="fails"/);
+    assert.match(markup, /1 selected/);
+    assert.equal(dashboard.element('#q-count').textContent, 1);
+  });
+}
+
+test('a stale local 401 cannot clear a newer demo session', async () => {
+  let finishOldRequest;
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': () => new Promise(resolve => { finishOldRequest = resolve; }),
+      '/api/messages?status=quarantine': [],
+    },
+  });
+  dashboard.localSession.set({ token: 'synthetic-new-session', user: { email: 'new@example.test' } });
+  await dashboard.navigate('#/login');
+  finishOldRequest({ status: 401, body: { message: 'Old session expired' } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dashboard.localSession.get()?.token, 'synthetic-new-session');
+});
+
+test('a delayed local sign-out cannot clear a session established after it started', async () => {
+  let finishLogout;
+  const dashboard = await openDashboard({
+    demoSignedIn: true,
+    demoData: {
+      '/api/stats': { total: 0, safe: 0, suspicious: 0, phishing: 0, quarantined: 0, daily: [] },
+      '/api/messages?status=quarantine': [],
+      '/api/auth/logout': ({ method }) => {
+        assert.equal(method, 'POST');
+        return new Promise(resolve => { finishLogout = resolve; });
+      },
+    },
+  });
+  const signingOut = dashboard.signOut();
+  dashboard.localSession.set({ token: 'synthetic-new-session', user: { email: 'new@example.test' } });
+  await dashboard.navigate('#/login');
+  finishLogout({ status: 200, body: {} });
+  await signingOut;
+  assert.equal(dashboard.localSession.get()?.token, 'synthetic-new-session');
 });

@@ -1,0 +1,5 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python -m pytest backend database/test_storage_regressions.py ml/test_model_api.py PhishGuard/tests -q --tb=short -p no:cacheprovider
+................................................................................                          [100%]
+80 passed, 39 subtests passed in 1.93s
+
+Exit code: 0

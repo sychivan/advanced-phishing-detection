@@ -1,0 +1,8 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python -m database.check_storage
+PASS: Saved and retrieved the model prediction
+Analysis ID: 1
+Classification: Safe
+Score: 36.98
+PASS: Invalid model reference rejected; email insert rolled back
+
+Exit code: 0

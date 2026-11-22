@@ -1,0 +1,10 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python scripts/http_smoke.py
+Backend database is ready with V1 registered.
+PASS real V1 + persistence: Phishing 85.92
+PASS real V1 + persistence: Safe 40.24
+PASS quarantine/restore preserve prediction; attributed feedback and admin review
+PASS stats: moderate1, high1, unscored1; no fabricated Low score
+PASS delete and revoked bearer401; no Google or external LLM requests
+Artifact SHA-256: 633f1c0893b5f63c02097b6482485a7bcf221383759f31f65406ace70b8d5cae
+
+Exit code: 0

@@ -3,6 +3,7 @@ import unittest
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 from unittest.mock import patch
 from app import app
 
@@ -138,6 +139,43 @@ class TestBackend(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json["model_status"], "storage_error")
         save.assert_called_once()
+
+    @patch("app.list_messages")
+    def test_stats_keep_unscored_separate_and_include_score_boundaries(self, messages):
+        today = datetime.now(timezone.utc).date().isoformat()
+        scores = [0, 39.99, 40, 69.99, 70, 100, None, float("nan"), True, -1, 101, "45"]
+        messages.side_effect = [[{"score": score, "receivedAt": today} for score in scores], []]
+        response = self.client.get("/api/stats", headers=self.auth)
+        self.assertEqual(response.status_code, 200)
+        data = response.json
+        self.assertEqual({key: data[key] for key in ("total", "safe", "suspicious", "phishing", "unscored")},
+                         {"total": 12, "safe": 2, "suspicious": 2, "phishing": 2, "unscored": 6})
+        self.assertEqual(data["daily"][-1], {"date": today, "safe": 4, "phishing": 2, "unscored": 6})
+
+    @patch("app.DEMO_EMAIL", "reviewer@example.test")
+    @patch("app.restore_message", return_value={"id": 1, "status": "inbox"})
+    def test_restore_feedback_uses_authenticated_identity(self, restore):
+        response = self.client.post("/api/messages/1/restore", headers=self.auth)
+        self.assertEqual(response.status_code, 200)
+        restore.assert_called_once_with(1, submitted_by="reviewer@example.test")
+
+    @patch("app.ADMIN_EMAIL", "demo@example.test")
+    @patch("app.DEMO_EMAIL", "demo@example.test")
+    def test_out_of_range_route_ids_return_json_not_database_errors(self):
+        for record_id in (0, 1 << 63):
+            for method, path in [
+                ("GET", f"/api/messages/{record_id}"),
+                ("DELETE", f"/api/messages/{record_id}"),
+                ("POST", f"/api/messages/{record_id}/quarantine"),
+                ("POST", f"/api/messages/{record_id}/restore"),
+                ("GET", f"/api/feedback/{record_id}"),
+                ("POST", f"/api/feedback/{record_id}/review"),
+            ]:
+                with self.subTest(method=method, path=path):
+                    response = self.client.open(path, method=method, headers=self.auth,
+                                                json={"decision": "approved"})
+                    self.assertEqual(response.status_code, 404)
+                    self.assertTrue(response.is_json)
 
 
 if __name__ == "__main__":

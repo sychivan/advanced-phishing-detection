@@ -30,15 +30,15 @@ def save_analysis(sender, subject, body, model_version_id, result):
         raise ValueError("Only successful model results can be saved")
 
     classification = result.get("classification")
-    if classification not in {"Safe", "Suspicious", "Phishing"}:
+    if not isinstance(classification, str) or classification not in {"Safe", "Suspicious", "Phishing"}:
         raise ValueError("Invalid classification")
 
     score = result.get("risk_score")
     if (
         isinstance(score, bool)
         or not isinstance(score, (int, float))
-        or not math.isfinite(score)
         or not 0 <= score <= 100
+        or not math.isfinite(score)
     ):
         raise ValueError("Score must be a finite number from 0 to 100")
 
@@ -105,7 +105,7 @@ def submit_feedback(analysis_id, submitted_by, suggested_label):
     if not isinstance(submitted_by, str) or not submitted_by.strip():
         raise ValueError("Submitter identity is required")
 
-    if suggested_label not in {"Safe", "Phishing"}:
+    if not isinstance(suggested_label, str) or suggested_label not in {"Safe", "Phishing"}:
         raise ValueError("Suggested label must be Safe or Phishing")
 
     with closing(connect()) as connection:
@@ -135,7 +135,7 @@ def review_feedback(feedback_id, reviewed_by, decision):
     if not isinstance(reviewed_by, str) or not reviewed_by.strip():
         raise ValueError("Reviewer identity is required")
 
-    if decision not in {"approved", "rejected"}:
+    if not isinstance(decision, str) or decision not in {"approved", "rejected"}:
         raise ValueError("Decision must be approved or rejected")
 
     with closing(connect()) as connection:
@@ -262,9 +262,11 @@ def list_messages(status="inbox"):
             FROM emails e
             LEFT JOIN analysis_results a
                 ON a.id = (
-                    SELECT MAX(a2.id)
+                    SELECT a2.id
                     FROM analysis_results a2
                     WHERE a2.email_id = e.id
+                    ORDER BY a2.analysed_at DESC, a2.id DESC
+                    LIMIT 1
                 )
             WHERE e.status = ?
             ORDER BY e.created_at DESC, e.id DESC
@@ -272,28 +274,38 @@ def list_messages(status="inbox"):
             (status,)
         ).fetchall()
 
-    messages = []
+    return [_message_from_row(row) for row in rows]
 
-    for row in rows:
-        sender = row["sender"]
 
-        messages.append({
-            "id": str(row["id"]),
-            "from": {
-                "name": sender.split("@")[0],
-                "email": sender
-            },
-            "subject": row["subject"],
-            "receivedAt": row["created_at"],
-            "score": row["risk_score"] if row["risk_score"] is not None else 0,
-            "preview": row["body"][:120],
-            "body": row["body"],
-            "status": row["status"],
-            "signals": [],
-            "links": []
-        })
+def _message_from_row(row):
+    """Use the same analysis and unknown-score representation in every view."""
+    reasons = []
+    if row["reasons_json"]:
+        try:
+            parsed = json.loads(row["reasons_json"])
+            if isinstance(parsed, list):
+                reasons = [str(item) for item in parsed]
+        except (json.JSONDecodeError, TypeError):
+            pass
 
-    return messages
+    return {
+        "id": str(row["id"]),
+        "from": {
+            "name": row["sender"].split("@")[0],
+            "email": row["sender"],
+        },
+        "subject": row["subject"],
+        "body": row["body"],
+        "preview": (row["body"] or "")[:120],
+        "receivedAt": row["created_at"],
+        "status": row["status"],
+        # No analysis is unknown, not a zero-risk prediction.
+        "score": row["risk_score"],
+        "classification": row["classification"],
+        "signals": reasons,
+        "reasons": reasons,
+        "links": [],
+    }
 
 
 def quarantine_message(message_id):
@@ -352,39 +364,18 @@ def get_message_by_id(message_id):
     if row is None:
         return None
 
-    reasons = []
-    if row["reasons_json"]:
-        try:
-            parsed = json.loads(row["reasons_json"])
-            if isinstance(parsed, list):
-                reasons = [str(item) for item in parsed]
-        except (json.JSONDecodeError, TypeError):
-            reasons = []
-
-    score = row["risk_score"]
-
-    return {
-        "id": str(row["id"]),
-        "from": {
-            "name": row["sender"].split("@")[0],
-            "email": row["sender"]
-        },
-        "subject": row["subject"],
-        "body": row["body"],
-        "preview": (row["body"] or "")[:120],
-        "receivedAt": row["created_at"],
-        "status": row["status"],
-        "score": score,
-        "classification": row["classification"],
-        "signals": reasons,
-        "reasons": reasons
-    }
+    return _message_from_row(row)
 
 
 
 
-def restore_message(message_id):
-    """Restore a quarantined email and record false-positive feedback."""
+def restore_message(message_id, submitted_by=None):
+    """Restore locally; record pending feedback only for an identified user."""
+
+    if submitted_by is not None and (
+        not isinstance(submitted_by, str) or not submitted_by.strip()
+    ):
+        raise ValueError("Submitter identity must be a nonempty string")
 
     with closing(connect()) as connection:
         with connection:
@@ -407,13 +398,17 @@ def restore_message(message_id):
                 SELECT id, classification
                 FROM analysis_results
                 WHERE email_id = ?
-                ORDER BY id DESC
+                ORDER BY analysed_at DESC, id DESC
                 LIMIT 1
                 """,
                 (message_id,)
             ).fetchone()
 
-            if analysis and analysis["classification"] == "Phishing":
+            if (
+                submitted_by is not None
+                and analysis
+                and analysis["classification"] == "Phishing"
+            ):
                 existing = connection.execute(
                     """
                     SELECT id
@@ -435,7 +430,7 @@ def restore_message(message_id):
                         """,
                         (
                             analysis["id"],
-                            "demo_user",
+                            submitted_by.strip(),
                             "Safe"
                         )
                     )

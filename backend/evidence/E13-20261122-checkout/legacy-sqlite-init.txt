@@ -1,0 +1,5 @@
+Command: /workspace/scratch/d90837b07f85/phishguard_code_audit/.venv/bin/python database/init_db.py
+Database ready: /tmp/phishguard-verify-wqk6i1kf/legacy.sqlite3
+Tables: analysis_results, emails, feedback, model_versions
+
+Exit code: 0
